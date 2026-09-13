@@ -20,6 +20,8 @@ macOS/Linux equivalent: `cp .env.example .env.local`.
 
 Set `GEMINI_API_KEY` in `.env.local` to a key from [Google AI Studio](https://aistudio.google.com/apikey). Never prefix the key with `NEXT_PUBLIC_`. `GEMINI_MODEL` optionally selects a model supporting structured JSON; the default is `gemini-2.5-flash`. Restart after changing environment variables.
 
+Optional cloud accounts require `NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`. Supabase Row Level Security and the private `lecture-pdfs` bucket keep each signed-in user's library isolated. Guest generation remains fully available when Supabase is not configured.
+
 ```bash
 npm run dev
 ```
@@ -51,6 +53,7 @@ Live failures remain visible and never silently fall back to sample content.
 - Shared TypeScript interfaces and runtime validation enforce complete fields, four options per question, valid answer indexes, and exactly five questions.
 - Client and server file checks, a 50-second request bound, cancellation, quota/configuration/network errors, and a multi-step processing state.
 - The most recent generated pack is saved in localStorage. Malformed saved data is removed safely.
+- Optional email/password accounts can save the complete pack and original PDF to a private, RLS-protected Supabase library without changing the Gemini flow.
 - A dedicated light print layout creates a complete shareable pack through the browser's native print/save-as-PDF flow; no PDF runtime dependency is required.
 - No database, authentication, analytics, external fonts, or additional services.
 
@@ -60,6 +63,8 @@ Live failures remain visible and never silently fall back to sample content.
 | --- | --- | --- |
 | `GEMINI_API_KEY` | For live PDF processing | Server-only Gemini API key |
 | `GEMINI_MODEL` | No | PDF-capable structured-output model; defaults to `gemini-2.5-flash` |
+| `NEXT_PUBLIC_SUPABASE_URL` | For cloud accounts | Supabase project URL |
+| `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` | For cloud accounts | Browser-safe Supabase publishable key; access remains constrained by RLS |
 
 ## Checks
 

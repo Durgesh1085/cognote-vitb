@@ -1,9 +1,11 @@
 "use client";
 
 import { useEffect, useRef, useState, type DragEvent } from "react";
-import { AlertTriangle, ArrowLeft, BookOpen, Brain, Check, CheckCircle2, ChevronRight, Circle, FileText, Flame, GraduationCap, Layers3, LoaderCircle, Printer, RotateCcw, ShieldCheck, Sparkles, Target, UploadCloud, X, Zap } from "lucide-react";
+import type { User } from "@supabase/supabase-js";
+import { AlertTriangle, ArrowLeft, BookOpen, Brain, Check, CheckCircle2, ChevronRight, Circle, Cloud, FileText, Flame, FolderOpen, GraduationCap, Layers3, Library, LoaderCircle, LockKeyhole, LogIn, LogOut, Mail, Printer, RotateCcw, Save, ShieldCheck, Sparkles, Target, Trash2, UploadCloud, UserRound, X, Zap } from "lucide-react";
 import { samplePack } from "@/lib/sample-pack";
 import { isQuestionStyle, isRecord, parseStudyPack, type QuestionStyle, type StudyPack } from "@/lib/study-pack";
+import { getSupabaseBrowserClient } from "@/lib/supabase/client";
 
 const STORE_KEY = "examsprint.last-pack.v1";
 const MAX_BYTES = 4 * 1024 * 1024;
@@ -11,6 +13,22 @@ const processingSteps = ["Reading lecture material...", "Finding exam-worthy con
 
 interface StoredPack { pack: StudyPack; course: string; fileName: string; questionStyle: QuestionStyle; isSample: boolean; createdAt: string }
 interface CramCard { label: string; title: string; body: string; secondary?: string; sourcePage: number | null }
+interface StudyPackRow { id: string; user_id: string; title: string; subject: string; question_style: string; pdf_path: string | null; pack: unknown; quiz_score: number | null; created_at: string }
+type AuthMode = "sign-in" | "sign-up";
+type AuthIntent = "save" | "library" | null;
+type CloudNotice = { tone: "success" | "error"; text: string };
+
+function asStudyPackRow(value: unknown): StudyPackRow | null {
+  if (!isRecord(value) || typeof value.id !== "string" || typeof value.user_id !== "string" || typeof value.title !== "string" || typeof value.subject !== "string" || typeof value.question_style !== "string" || typeof value.created_at !== "string") return null;
+  if (value.pdf_path !== null && typeof value.pdf_path !== "string") return null;
+  if (value.quiz_score !== null && typeof value.quiz_score !== "number") return null;
+  return { id: value.id, user_id: value.user_id, title: value.title, subject: value.subject, question_style: value.question_style, pdf_path: value.pdf_path, pack: value.pack, quiz_score: value.quiz_score, created_at: value.created_at };
+}
+
+function safePdfName(name: string) {
+  const normalized = name.replace(/[^a-zA-Z0-9._-]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 100) || "lecture.pdf";
+  return normalized.toLowerCase().endsWith(".pdf") ? normalized : `${normalized}.pdf`;
+}
 
 function PageSource({ page, onOpen }: { page: number | null; onOpen?: (page: number) => void }) {
   if (!page) return null;
@@ -20,6 +38,7 @@ function PageSource({ page, onOpen }: { page: number | null; onOpen?: (page: num
 }
 
 export default function ExamSprint() {
+  const supabase = getSupabaseBrowserClient();
   const inputRef = useRef<HTMLInputElement>(null);
   const controller = useRef<AbortController | null>(null);
   const [file, setFile] = useState<File | null>(null);
@@ -37,6 +56,28 @@ export default function ExamSprint() {
   const [sourcePage, setSourcePage] = useState<number | null>(null);
   const [cramOpen, setCramOpen] = useState(false);
   const [cramIndex, setCramIndex] = useState(0);
+  const [user, setUser] = useState<User | null>(null);
+  const [authReady, setAuthReady] = useState(false);
+  const [authOpen, setAuthOpen] = useState(false);
+  const [authMode, setAuthMode] = useState<AuthMode>("sign-in");
+  const [authIntent, setAuthIntent] = useState<AuthIntent>(null);
+  const [authEmail, setAuthEmail] = useState("");
+  const [authPassword, setAuthPassword] = useState("");
+  const [authBusy, setAuthBusy] = useState(false);
+  const [authError, setAuthError] = useState("");
+  const [authMessage, setAuthMessage] = useState("");
+  const [libraryOpen, setLibraryOpen] = useState(false);
+  const [libraryBusy, setLibraryBusy] = useState(false);
+  const [libraryError, setLibraryError] = useState("");
+  const [libraryRows, setLibraryRows] = useState<StudyPackRow[]>([]);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [saveStatus, setSaveStatus] = useState<"idle" | "saving" | "saved">("idle");
+  const [cloudNotice, setCloudNotice] = useState<CloudNotice | null>(null);
+  const [currentSavedId, setCurrentSavedId] = useState<string | null>(null);
+  const [currentPdfPath, setCurrentPdfPath] = useState<string | null>(null);
+  const [cloudPdfUrl, setCloudPdfUrl] = useState<string | null>(null);
+  const [sourceLoading, setSourceLoading] = useState(false);
+  const [sourceError, setSourceError] = useState("");
 
   useEffect(() => {
     try {
@@ -50,6 +91,18 @@ export default function ExamSprint() {
     } catch { localStorage.removeItem(STORE_KEY); }
     return () => controller.current?.abort();
   }, []);
+
+  useEffect(() => {
+    if (!supabase) { setAuthReady(true); return; }
+    let active = true;
+    void supabase.auth.getUser().then(({ data }) => {
+      if (active) { setUser(data.user ?? null); setAuthReady(true); }
+    }).catch(() => { if (active) setAuthReady(true); });
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      if (active) setUser(session?.user ?? null);
+    });
+    return () => { active = false; subscription.unsubscribe(); };
+  }, [supabase]);
 
   useEffect(() => {
     if (!busy) return;
@@ -79,6 +132,7 @@ export default function ExamSprint() {
 
   function store(next: StoredPack) {
     setResult(next); setAnswers({}); setActiveQuestion(0); setSourcePage(null); setCramOpen(false); setCramIndex(0);
+    setCurrentSavedId(null); setCurrentPdfPath(null); setCloudPdfUrl(null); setSaveStatus("idle"); setCloudNotice(null);
     try { localStorage.setItem(STORE_KEY, JSON.stringify(next)); } catch { /* The current session remains usable. */ }
   }
 
@@ -123,11 +177,13 @@ export default function ExamSprint() {
   ] : [];
 
   useEffect(() => {
-    if (!sourcePage && !cramOpen) return;
+    if (!sourcePage && !cramOpen && !authOpen && !libraryOpen) return;
     const previousOverflow = document.body.style.overflow;
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
         if (sourcePage) setSourcePage(null);
+        else if (authOpen) setAuthOpen(false);
+        else if (libraryOpen) setLibraryOpen(false);
         else setCramOpen(false);
       } else if (cramOpen && !sourcePage && event.key === "ArrowRight") {
         setCramIndex(index => Math.min(cramCards.length, index + 1));
@@ -138,7 +194,160 @@ export default function ExamSprint() {
     document.body.style.overflow = "hidden";
     window.addEventListener("keydown", onKeyDown);
     return () => { document.body.style.overflow = previousOverflow; window.removeEventListener("keydown", onKeyDown); };
-  }, [cramCards.length, cramOpen, sourcePage]);
+  }, [authOpen, cramCards.length, cramOpen, libraryOpen, sourcePage]);
+
+  const activePdfUrl = sourcePdfUrl || cloudPdfUrl;
+
+  function openAuth(intent: AuthIntent = null) {
+    setAuthIntent(intent); setAuthMode("sign-in"); setAuthError(""); setAuthMessage(""); setAuthPassword(""); setAuthOpen(true);
+  }
+
+  async function getVerifiedUser() {
+    if (!supabase) throw new Error("Cloud accounts are not configured for this deployment.");
+    const { data, error: userError } = await supabase.auth.getUser();
+    if (userError || !data.user) throw new Error("Sign in to use your revision library.");
+    return data.user;
+  }
+
+  async function submitAuth() {
+    if (!supabase) { setAuthError("Cloud accounts are not configured for this deployment."); return; }
+    if (!authEmail.trim() || authPassword.length < 6) { setAuthError("Enter a valid email and a password with at least 6 characters."); return; }
+    setAuthBusy(true); setAuthError(""); setAuthMessage("");
+    try {
+      if (authMode === "sign-up") {
+        const { data, error: signUpError } = await supabase.auth.signUp({ email: authEmail.trim(), password: authPassword });
+        if (signUpError) throw signUpError;
+        if (!data.session) { setAuthMessage("Account created. Check your email to confirm it, then sign in."); setAuthMode("sign-in"); return; }
+        setUser(data.user); setAuthOpen(false);
+      } else {
+        const { data, error: signInError } = await supabase.auth.signInWithPassword({ email: authEmail.trim(), password: authPassword });
+        if (signInError) throw signInError;
+        setUser(data.user); setAuthOpen(false);
+      }
+      const intent = authIntent;
+      setAuthIntent(null); setAuthPassword("");
+      if (intent === "save") await saveCurrentToLibrary();
+      if (intent === "library") await loadLibrary();
+    } catch (authProblem) {
+      const message = authProblem instanceof Error ? authProblem.message.toLowerCase() : "";
+      setAuthError(message.includes("invalid login") ? "Email or password is incorrect." : message.includes("already registered") ? "An account already exists for this email. Try signing in." : "Authentication failed. Check your details and try again.");
+    } finally { setAuthBusy(false); }
+  }
+
+  async function signOut() {
+    if (!supabase) return;
+    setCloudNotice(null);
+    const { error: signOutError } = await supabase.auth.signOut();
+    if (signOutError) { setCloudNotice({ tone: "error", text: "Couldn’t sign out. Please try again." }); return; }
+    setUser(null); setLibraryOpen(false); setLibraryRows([]); setCurrentSavedId(null); setCurrentPdfPath(null); setCloudPdfUrl(null); setSaveStatus("idle");
+  }
+
+  async function saveCurrentToLibrary() {
+    if (!result || saveStatus === "saving" || currentSavedId) return;
+    if (!supabase) { setCloudNotice({ tone: "error", text: "Cloud accounts are not configured for this deployment." }); return; }
+    let uploadedPath: string | null = null;
+    setSaveStatus("saving"); setCloudNotice(null);
+    try {
+      const verified = await getVerifiedUser();
+      if (sourceFile) {
+        uploadedPath = `${verified.id}/${crypto.randomUUID()}-${safePdfName(sourceFile.name)}`;
+        const { error: uploadError } = await supabase.storage.from("lecture-pdfs").upload(uploadedPath, sourceFile, { contentType: "application/pdf", upsert: false });
+        if (uploadError) throw new Error("The original PDF could not be stored. Check your storage policy and try again.");
+      }
+      const { data, error: insertError } = await supabase.from("study_packs").insert({
+        user_id: verified.id,
+        title: result.pack.title,
+        subject: result.course,
+        question_style: result.questionStyle,
+        pdf_path: uploadedPath,
+        pack: result.pack,
+        quiz_score: answeredCount === 5 ? score : null,
+        created_at: new Date().toISOString(),
+      }).select("id").single();
+      if (insertError || !isRecord(data) || typeof data.id !== "string") {
+        if (uploadedPath) await supabase.storage.from("lecture-pdfs").remove([uploadedPath]);
+        throw new Error("The revision pack could not be saved. Check your table policy and try again.");
+      }
+      setCurrentSavedId(data.id); setCurrentPdfPath(uploadedPath); setSaveStatus("saved");
+      setCloudNotice({ tone: "success", text: "Saved to My Library ✓" });
+    } catch (saveProblem) {
+      setSaveStatus("idle");
+      if (saveProblem instanceof Error && saveProblem.message.includes("Sign in")) { openAuth("save"); return; }
+      setCloudNotice({ tone: "error", text: saveProblem instanceof Error ? saveProblem.message : "Couldn’t save this revision pack. Please try again." });
+    }
+  }
+
+  async function loadLibrary() {
+    if (!supabase) { setCloudNotice({ tone: "error", text: "Cloud accounts are not configured for this deployment." }); return; }
+    setLibraryOpen(true); setLibraryBusy(true); setLibraryError("");
+    try {
+      const verified = await getVerifiedUser();
+      const { data, error: loadError } = await supabase.from("study_packs").select("id,user_id,title,subject,question_style,pdf_path,pack,quiz_score,created_at").eq("user_id", verified.id).order("created_at", { ascending: false });
+      if (loadError) throw loadError;
+      setLibraryRows(Array.isArray(data) ? data.map(asStudyPackRow).filter((row): row is StudyPackRow => row !== null && row.user_id === verified.id) : []);
+    } catch (loadProblem) {
+      if (loadProblem instanceof Error && loadProblem.message.includes("Sign in")) { setLibraryOpen(false); openAuth("library"); return; }
+      setLibraryError("Couldn’t load your library. Check your connection and try again.");
+    } finally { setLibraryBusy(false); }
+  }
+
+  function openSavedPack(row: StudyPackRow) {
+    try {
+      if (!isQuestionStyle(row.question_style)) throw new Error("Invalid question style");
+      const pack = parseStudyPack(row.pack);
+      setSourceFile(null);
+      store({ pack, course: row.subject.slice(0, 120), fileName: row.pdf_path?.split("/").pop() || "Saved revision pack", questionStyle: row.question_style, isSample: false, createdAt: row.created_at });
+      setCurrentSavedId(row.id); setCurrentPdfPath(row.pdf_path); setSaveStatus("saved"); setLibraryOpen(false);
+      requestAnimationFrame(() => document.getElementById("revision-pack")?.scrollIntoView({ behavior: "smooth", block: "start" }));
+    } catch { setLibraryError("This saved pack is incomplete and can’t be opened safely."); }
+  }
+
+  async function deleteSavedPack(row: StudyPackRow) {
+    if (!supabase || !window.confirm(`Delete “${row.title}” from My Library? This cannot be undone.`)) return;
+    setDeletingId(row.id); setLibraryError("");
+    try {
+      const verified = await getVerifiedUser();
+      if (row.user_id !== verified.id) throw new Error("This revision pack does not belong to the signed-in account.");
+      if (row.pdf_path) {
+        const { error: storageError } = await supabase.storage.from("lecture-pdfs").remove([row.pdf_path]);
+        if (storageError) throw new Error("The stored PDF could not be deleted, so the revision pack was kept.");
+      }
+      const { error: deleteError } = await supabase.from("study_packs").delete().eq("id", row.id).eq("user_id", verified.id);
+      if (deleteError) throw deleteError;
+      setLibraryRows(rows => rows.filter(item => item.id !== row.id));
+      if (currentSavedId === row.id) { setCurrentSavedId(null); setCurrentPdfPath(null); setCloudPdfUrl(null); setSaveStatus("idle"); }
+    } catch (deleteProblem) { setLibraryError(deleteProblem instanceof Error ? deleteProblem.message : "Couldn’t delete this revision pack. Please try again."); }
+    finally { setDeletingId(null); }
+  }
+
+  async function openSource(page: number) {
+    setSourcePage(page); setSourceError("");
+    if (sourcePdfUrl || cloudPdfUrl || !currentPdfPath) return;
+    if (!supabase) { setSourceError("Cloud PDF access is not configured for this deployment."); return; }
+    setSourceLoading(true);
+    try {
+      await getVerifiedUser();
+      const { data, error: signedUrlError } = await supabase.storage.from("lecture-pdfs").createSignedUrl(currentPdfPath, 600);
+      if (signedUrlError || !data?.signedUrl) throw signedUrlError || new Error("Missing signed URL");
+      setCloudPdfUrl(data.signedUrl);
+    } catch { setSourceError("The saved lecture PDF could not be opened. Sign in again or retry later."); }
+    finally { setSourceLoading(false); }
+  }
+
+  useEffect(() => {
+    if (!sourcePage || sourcePdfUrl || cloudPdfUrl || !currentPdfPath) return;
+    void openSource(sourcePage);
+  }, [cloudPdfUrl, currentPdfPath, sourcePage, sourcePdfUrl]);
+
+  useEffect(() => {
+    if (!supabase || !user || !currentSavedId || answeredCount !== 5) return;
+    let active = true;
+    void supabase.auth.getUser().then(async ({ data }) => {
+      if (!active || data.user?.id !== user.id) return;
+      await supabase.from("study_packs").update({ quiz_score: score }).eq("id", currentSavedId).eq("user_id", data.user.id);
+    });
+    return () => { active = false; };
+  }, [answeredCount, currentSavedId, score, supabase, user]);
 
   function retryQuiz() { setAnswers({}); setActiveQuestion(0); }
   function goToQuiz() {
@@ -159,7 +368,7 @@ export default function ExamSprint() {
     <header className="app-header">
       <a className="logo" href="/" aria-label="ExamSprint AI home"><span><GraduationCap size={24} /></span><strong>ExamSprint</strong><em>AI</em></a>
       <div className="header-status"><span className="online-dot" /> Gemini-powered <span className="header-divider" /> Revision packs save on this device</div>
-      <button className="sample-button" onClick={loadSample} disabled={busy}><Zap size={15} /> Try Sample Lecture</button>
+      <div className="header-actions"><button className="sample-button" onClick={loadSample} disabled={busy}><Zap size={15} /> Try Sample Lecture</button>{user ? <><button className="library-button" onClick={() => void loadLibrary()}><Library size={15} /> My Library</button><span className="account-email"><UserRound size={14} /> {user.email}</span><button className="account-icon-button" onClick={() => void signOut()} aria-label="Sign out" title="Sign out"><LogOut size={16} /></button></> : <button className="library-button" onClick={() => openAuth(null)} disabled={!authReady}><LogIn size={15} /> Sign in</button>}</div>
     </header>
 
     <main className="workspace">
@@ -192,9 +401,10 @@ export default function ExamSprint() {
       {result && !busy && <section id="revision-pack" className="revision-pack">
         <div className="pack-header">
           <div className="print-brand print-only"><span><GraduationCap size={21} /></span><strong>ExamSprint AI</strong><em>Revision Pack</em></div>
-          <div className="pack-header-actions"><button className="back-button" onClick={() => document.querySelector(".builder-card")?.scrollIntoView({ behavior: "smooth" })}><ArrowLeft size={15} /> New lecture</button><div className="pack-action-group"><button className="cram-button" onClick={() => { setCramIndex(0); setCramOpen(true); }}><Brain size={16} /> Start Cram Mode</button><button className="export-button" onClick={exportPack}><Printer size={16} /> Export Revision Pack</button></div></div>
+          <div className="pack-header-actions"><button className="back-button" onClick={() => document.querySelector(".builder-card")?.scrollIntoView({ behavior: "smooth" })}><ArrowLeft size={15} /> New lecture</button><div className="pack-action-group"><button className={`save-library-button ${saveStatus === "saved" || currentSavedId ? "saved" : ""}`} onClick={() => user ? void saveCurrentToLibrary() : openAuth("save")} disabled={saveStatus === "saving" || Boolean(currentSavedId)}>{saveStatus === "saving" ? <LoaderCircle className="spin" size={16} /> : saveStatus === "saved" || currentSavedId ? <Check size={16} /> : <Save size={16} />}{saveStatus === "saving" ? "Saving..." : saveStatus === "saved" || currentSavedId ? "Saved to My Library" : "Save to My Library"}</button><button className="cram-button" onClick={() => { setCramIndex(0); setCramOpen(true); }}><Brain size={16} /> Start Cram Mode</button><button className="export-button" onClick={exportPack}><Printer size={16} /> Export Revision Pack</button></div></div>
           <div className="pack-title"><div><span className={`result-badge ${result.isSample ? "sample" : ""}`}><Sparkles size={12} /> {result.isSample ? "SAMPLE REVISION PACK" : "AI REVISION PACK"}</span><h2>{result.pack.title}</h2><p>{result.course} <span>·</span> {result.questionStyle} <span>·</span> {result.fileName}</p></div><div className="pack-score"><strong>{answeredCount}<span>/5</span></strong><small>questions answered</small></div></div>
         </div>
+        {cloudNotice && <div className={`cloud-notice ${cloudNotice.tone}`} role="status">{cloudNotice.tone === "success" ? <CheckCircle2 size={16} /> : <AlertTriangle size={16} />}<span>{cloudNotice.text}</span><button onClick={() => setCloudNotice(null)} aria-label="Dismiss"><X size={14} /></button></div>}
 
         <div className="pack-layout">
           <div className="pack-main">
@@ -237,6 +447,22 @@ export default function ExamSprint() {
     </main>
     <footer><span>ExamSprint AI</span><p>Study the signal. Skip the noise.</p><span>Powered by Gemini</span></footer>
 
+    {authOpen && <div className="auth-overlay" onMouseDown={event => { if (event.target === event.currentTarget) setAuthOpen(false); }}>
+      <section className="auth-modal" role="dialog" aria-modal="true" aria-labelledby="auth-title">
+        <header><div><span><Cloud size={19} /></span><div><strong id="auth-title">{authMode === "sign-in" ? "Sign in to ExamSprint" : "Create your account"}</strong><small>Your study flow always works without an account.</small></div></div><button type="button" onClick={() => setAuthOpen(false)} aria-label="Close account dialog"><X size={20} /></button></header>
+        <div className="auth-tabs"><button type="button" className={authMode === "sign-in" ? "active" : ""} onClick={() => { setAuthMode("sign-in"); setAuthError(""); setAuthMessage(""); }}>Sign In</button><button type="button" className={authMode === "sign-up" ? "active" : ""} onClick={() => { setAuthMode("sign-up"); setAuthError(""); setAuthMessage(""); }}>Sign Up</button></div>
+        <form onSubmit={event => { event.preventDefault(); void submitAuth(); }}><label><span>Email</span><div><Mail size={16} /><input type="email" value={authEmail} onChange={event => setAuthEmail(event.target.value)} placeholder="you@example.com" autoComplete="email" required /></div></label><label><span>Password</span><div><LockKeyhole size={16} /><input type="password" value={authPassword} onChange={event => setAuthPassword(event.target.value)} placeholder="At least 6 characters" autoComplete={authMode === "sign-in" ? "current-password" : "new-password"} minLength={6} required /></div></label>{authError && <p className="auth-feedback error"><AlertTriangle size={15} /> {authError}</p>}{authMessage && <p className="auth-feedback success"><CheckCircle2 size={15} /> {authMessage}</p>}<button className="auth-submit" type="submit" disabled={authBusy}>{authBusy ? <LoaderCircle className="spin" size={17} /> : authMode === "sign-in" ? <LogIn size={17} /> : <UserRound size={17} />}{authBusy ? "Please wait..." : authMode === "sign-in" ? "Sign In" : "Create Account"}</button></form>
+        <p className="auth-guest-note">Guest mode stays available. Signing in only enables private cloud storage and cross-device history.</p>
+      </section>
+    </div>}
+
+    {libraryOpen && <div className="library-overlay" onMouseDown={event => { if (event.target === event.currentTarget) setLibraryOpen(false); }}>
+      <section className="library-panel" role="dialog" aria-modal="true" aria-labelledby="library-title">
+        <header><div><span><Library size={20} /></span><div><strong id="library-title">My Library</strong><small>{user?.email} · newest first</small></div></div><button type="button" onClick={() => setLibraryOpen(false)} aria-label="Close library"><X size={20} /></button></header>
+        <div className="library-content">{libraryError && <div className="library-error"><AlertTriangle size={16} /> {libraryError}<button onClick={() => void loadLibrary()}>Retry</button></div>}{libraryBusy ? <div className="library-empty"><LoaderCircle className="spin" size={29} /><h3>Loading your revision packs…</h3></div> : libraryRows.length === 0 ? <div className="library-empty"><span><Library size={30} /></span><h3>Your library is ready</h3><p>Save a generated revision pack and it will appear here across your devices.</p></div> : <div className="library-grid">{libraryRows.map(row => <article key={row.id}><div className="library-card-top"><span><FileText size={17} /></span><small>{new Date(row.created_at).toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" })}</small></div><h3>{row.title}</h3><p>{row.subject} <span>·</span> {row.question_style}</p><div className="library-card-meta"><span>{row.quiz_score === null ? "Quiz not completed" : `${row.quiz_score}/5 quiz score`}</span><span>{row.pdf_path ? "PDF stored privately" : "Notes only"}</span></div><div className="library-card-actions"><button type="button" onClick={() => openSavedPack(row)}><FolderOpen size={15} /> Open</button><button type="button" className="delete" onClick={() => void deleteSavedPack(row)} disabled={deletingId === row.id}>{deletingId === row.id ? <LoaderCircle className="spin" size={15} /> : <Trash2 size={15} />} Delete</button></div></article>)}</div>}</div>
+      </section>
+    </div>}
+
     {cramOpen && result && <div className="cram-overlay" onMouseDown={event => { if (event.target === event.currentTarget) setCramOpen(false); }}>
       <section className="cram-shell" role="dialog" aria-modal="true" aria-labelledby="cram-title">
         <header className="cram-header"><div><span><Brain size={17} /></span><div><strong id="cram-title">Cram Mode</strong><small>{result.course}</small></div></div><button type="button" onClick={() => setCramOpen(false)} aria-label="Close Cram Mode"><X size={20} /></button></header>
@@ -252,8 +478,8 @@ export default function ExamSprint() {
     {sourcePage && <div className="source-lens-overlay" onMouseDown={event => { if (event.target === event.currentTarget) setSourcePage(null); }}>
       <section className="source-lens" role="dialog" aria-modal="true" aria-labelledby="source-lens-title">
         <header><div><span><FileText size={19} /></span><div><strong id="source-lens-title">Source Lens</strong><small>Viewing original lecture — Page {sourcePage}</small></div></div><button type="button" onClick={() => setSourcePage(null)} aria-label="Close Source Lens"><X size={20} /></button></header>
-        {sourcePdfUrl && !result?.isSample ? <iframe key={`${sourcePdfUrl}-${sourcePage}`} src={`${sourcePdfUrl}#page=${sourcePage}&view=FitH`} title={`Original lecture PDF at page ${sourcePage}`} /> : <div className="source-unavailable"><span><FileText size={31} /></span><h3>Original lecture not attached</h3><p>Original PDF preview is available for uploaded lectures.</p></div>}
-        <footer><span>Page {sourcePage}</span>{sourcePdfUrl && !result?.isSample ? <a href={`${sourcePdfUrl}#page=${sourcePage}`} target="_blank" rel="noreferrer">Open full document <ChevronRight size={14} /></a> : null}</footer>
+        {sourceLoading ? <div className="source-unavailable"><LoaderCircle className="spin" size={34} /><h3>Opening saved lecture…</h3><p>Creating a temporary private link for this PDF.</p></div> : activePdfUrl && !result?.isSample ? <iframe key={`${activePdfUrl}-${sourcePage}`} src={`${activePdfUrl}#page=${sourcePage}&view=FitH`} title={`Original lecture PDF at page ${sourcePage}`} /> : <div className="source-unavailable"><span><FileText size={31} /></span><h3>Original lecture not attached</h3><p>{sourceError || "Original PDF preview is available for uploaded lectures."}</p></div>}
+        <footer><span>Page {sourcePage}</span>{activePdfUrl && !result?.isSample ? <a href={`${activePdfUrl}#page=${sourcePage}`} target="_blank" rel="noreferrer">Open full document <ChevronRight size={14} /></a> : null}</footer>
       </section>
     </div>}
   </div>;
