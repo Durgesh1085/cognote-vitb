@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
 import "./globals.css";
-export const metadata: Metadata = { title: "ExamSprint AI — Lecture to revision", description: "Turn lecture PDFs into grounded revision notes and practice questions with Gemini." };
+import "./cognote.css";
+export const metadata: Metadata = { title: "Cognote — Turn lectures into understanding", description: "Turn lecture PDFs into grounded, exam-ready revision experiences." };
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) { return <html lang="en"><body>{children}</body></html>; }

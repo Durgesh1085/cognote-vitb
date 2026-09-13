@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState, type DragEvent } from "react";
 import type { User } from "@supabase/supabase-js";
-import { AlertTriangle, ArrowLeft, BookOpen, Brain, Check, CheckCircle2, ChevronRight, Circle, Cloud, FileText, Flame, FolderOpen, GitFork, GraduationCap, Languages, Layers3, Library, LoaderCircle, LockKeyhole, LogIn, LogOut, Mail, Pause, Play, Printer, RotateCcw, Save, ShieldCheck, Sparkles, Square, Target, Trash2, UploadCloud, UserRound, Volume2, X, Zap } from "lucide-react";
+import { AlertTriangle, ArrowLeft, BookOpen, Brain, Check, CheckCircle2, ChevronRight, Circle, Cloud, FileText, Flame, FolderOpen, GitFork, HelpCircle, Languages, Layers3, Library, LoaderCircle, LockKeyhole, LogIn, LogOut, Mail, Menu, PanelLeftClose, PanelLeftOpen, Pause, Play, Plus, Printer, RotateCcw, Save, ShieldCheck, Sparkles, Square, Target, Trash2, UploadCloud, UserRound, Volume2, X, Zap } from "lucide-react";
 import { samplePack } from "@/lib/sample-pack";
 import { isQuestionStyle, isRecord, parseStudyPack, type QuestionStyle, type StudyPack } from "@/lib/study-pack";
 import { getSupabaseBrowserClient } from "@/lib/supabase/client";
@@ -32,6 +32,10 @@ function safePdfName(name: string) {
 
 function compactText(value: string, max = 105) {
   return value.length <= max ? value : `${value.slice(0, max - 1).trimEnd()}…`;
+}
+
+function CognoteMark() {
+  return <span className="cognote-mark" aria-hidden="true"><i /><i /><i /></span>;
 }
 
 function PageSource({ page, onOpen }: { page: number | null; onOpen?: (page: number) => void }) {
@@ -90,6 +94,10 @@ export default function ExamSprint() {
   const [speechSupported, setSpeechSupported] = useState(false);
   const [speechStatus, setSpeechStatus] = useState<"idle" | "playing" | "paused">("idle");
   const [speechMessage, setSpeechMessage] = useState("");
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [mobileNavOpen, setMobileNavOpen] = useState(false);
+  const [helpOpen, setHelpOpen] = useState(false);
+  const [activeNav, setActiveNav] = useState("new-revision");
 
   useEffect(() => {
     try {
@@ -199,13 +207,15 @@ export default function ExamSprint() {
   }, [language, result?.createdAt]);
 
   useEffect(() => {
-    if (!sourcePage && !cramOpen && !authOpen && !libraryOpen) return;
+    if (!sourcePage && !cramOpen && !authOpen && !libraryOpen && !helpOpen && !mobileNavOpen) return;
     const previousOverflow = document.body.style.overflow;
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
         if (sourcePage) setSourcePage(null);
         else if (authOpen) setAuthOpen(false);
         else if (libraryOpen) setLibraryOpen(false);
+        else if (helpOpen) setHelpOpen(false);
+        else if (mobileNavOpen) setMobileNavOpen(false);
         else setCramOpen(false);
       } else if (cramOpen && !sourcePage && event.key === "ArrowRight") {
         setCramIndex(index => Math.min(cramCards.length, index + 1));
@@ -216,7 +226,7 @@ export default function ExamSprint() {
     document.body.style.overflow = "hidden";
     window.addEventListener("keydown", onKeyDown);
     return () => { document.body.style.overflow = previousOverflow; window.removeEventListener("keydown", onKeyDown); };
-  }, [authOpen, cramCards.length, cramOpen, libraryOpen, sourcePage]);
+  }, [authOpen, cramCards.length, cramOpen, helpOpen, libraryOpen, mobileNavOpen, sourcePage]);
 
   const activePdfUrl = sourcePdfUrl || cloudPdfUrl;
 
@@ -380,7 +390,7 @@ export default function ExamSprint() {
   function exportPack() {
     if (!result || !displayPack) return;
     const originalTitle = document.title;
-    document.title = `${displayPack.title} - ExamSprint AI Revision Pack`;
+    document.title = `${displayPack.title} - Cognote Revision Pack`;
     const restoreTitle = () => { document.title = originalTitle; window.removeEventListener("afterprint", restoreTitle); };
     window.addEventListener("afterprint", restoreTitle);
     window.print();
@@ -467,16 +477,35 @@ export default function ExamSprint() {
     }
   }
 
-  return <div className="site-shell">
+  function navigateSection(id: string) {
+    setActiveNav(id); setMobileNavOpen(false); setHelpOpen(false);
+    document.getElementById(id)?.scrollIntoView({ behavior: "smooth", block: "start" });
+  }
+
+  return <div className={`site-shell cognote-shell ${sidebarCollapsed ? "sidebar-collapsed" : ""}`}>
+    {mobileNavOpen && <button className="nav-scrim" aria-label="Close navigation" onClick={() => setMobileNavOpen(false)} />}
+    <aside className={`cognote-sidebar ${mobileNavOpen ? "mobile-open" : ""}`} aria-label="Main navigation">
+      <a className="sidebar-brand" href="/" aria-label="Cognote home"><CognoteMark /><strong>Cognote<span>YOUR LEARNING SPACE</span></strong></a>
+      <button className="sidebar-toggle" aria-label={sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"} onClick={() => setSidebarCollapsed(value => !value)}>{sidebarCollapsed ? <PanelLeftOpen size={17} /> : <PanelLeftClose size={17} />}</button>
+      <button className="mobile-nav-close" aria-label="Close navigation" onClick={() => setMobileNavOpen(false)}><X size={20} /></button>
+      <nav><button title="New Revision" className={activeNav === "new-revision" ? "active" : ""} onClick={() => navigateSection("new-revision")}><Plus size={18} /><span>New Revision</span></button>
+      <button title="My Library" onClick={() => { setMobileNavOpen(false); user ? void loadLibrary() : openAuth("library"); }}><Library size={18} /><span>My Library</span></button>
+      <small>THIS LECTURE</small>
+      <button title="Revision Pack" disabled={!result || busy} className={activeNav === "revision-pack" ? "active" : ""} onClick={() => navigateSection("revision-pack")}><BookOpen size={18} /><span>Revision Pack</span></button>
+      <button title="Visual Summary" disabled={!result || busy} className={activeNav === "visual-summary" ? "active" : ""} onClick={() => navigateSection("visual-summary")}><GitFork size={18} /><span>Visual Summary</span></button>
+      <button title="Cram Mode" disabled={!result || busy} onClick={() => { setMobileNavOpen(false); setCramIndex(0); setCramOpen(true); }}><Brain size={18} /><span>Cram Mode</span><em>FOCUS</em></button>
+      <button title="Practice Quiz" disabled={!result || busy} className={activeNav === "practice-quiz" ? "active" : ""} onClick={() => navigateSection("practice-quiz")}><Target size={18} /><span>Practice Quiz</span></button></nav>
+      <div className="sidebar-bottom"><div className="sidebar-note"><ShieldCheck size={19} /><strong>Your lecture. Your source.</strong><p>Every insight starts with the material you upload.</p></div><button title="Help & Guide" onClick={() => { setMobileNavOpen(false); setHelpOpen(true); }}><HelpCircle size={18} /><span>Help & Guide</span></button><button title={user ? "Sign out" : "Sign in"} onClick={() => { setMobileNavOpen(false); user ? void signOut() : openAuth(null); }}>{user ? <LogOut size={18} /> : <UserRound size={18} />}<span>{user ? user.email : "Sign in to save your work"}</span></button></div>
+    </aside>
     <header className="app-header">
-      <a className="logo" href="/" aria-label="ExamSprint AI home"><span><GraduationCap size={24} /></span><strong>ExamSprint</strong><em>AI</em></a>
-      <div className="header-status"><span className="online-dot" /> Gemini-powered <span className="header-divider" /> Revision packs save on this device</div>
+      <button className="mobile-menu" aria-label="Open navigation" aria-expanded={mobileNavOpen} onClick={() => setMobileNavOpen(true)}><Menu size={22} /></button><div className="header-context"><span>WORKSPACE</span><strong>Upload. Understand. Revise.</strong></div>
+      <div className="header-status"><span className="online-dot" /> Grounded in your lecture</div>
       <div className="header-actions"><button className="sample-button" onClick={loadSample} disabled={busy}><Zap size={15} /> Try Sample Lecture</button>{user ? <><button className="library-button" onClick={() => void loadLibrary()}><Library size={15} /> My Library</button><span className="account-email"><UserRound size={14} /> {user.email}</span><button className="account-icon-button" onClick={() => void signOut()} aria-label="Sign out" title="Sign out"><LogOut size={16} /></button></> : <button className="library-button" onClick={() => openAuth(null)} disabled={!authReady}><LogIn size={15} /> Sign in</button>}</div>
     </header>
 
     <main className="workspace">
-      <section className="intro">
-        <div className="intro-copy"><div className="eyebrow"><Sparkles size={13} /> YOUR REVISION COPILOT</div><h1>Turn lectures into<br /><span>revision in seconds.</span></h1><p>Upload a lecture PDF. Get the concepts that matter, the facts worth remembering, and five grounded questions to test yourself.</p></div>
+      <section className="intro" id="new-revision">
+        <div className="intro-copy"><div className="eyebrow"><Sparkles size={13} /> LESS BUSYWORK. MORE UNDERSTANDING.</div><h1>Turn lectures into<br /><span>understanding.</span></h1><p>Your lecture, distilled into the concepts that matter.<br />Grounded notes. Clear connections. Exam-ready recall.</p><div className="journey-strip"><span><FileText size={16} /> Lecture PDF</span><ChevronRight size={15} /><span><Sparkles size={16} /> AI understanding</span><ChevronRight size={15} /><span><Target size={16} /> Exam-ready revision</span></div></div>
         <div className="trust-strip"><div><ShieldCheck size={17} /><span><strong>Grounded in your PDF</strong><small>No outside material</small></span></div><div><Target size={17} /><span><strong>Exam-focused</strong><small>High-yield only</small></span></div><div><Brain size={17} /><span><strong>Active recall</strong><small>Exactly 5 questions</small></span></div></div>
       </section>
 
@@ -503,7 +532,7 @@ export default function ExamSprint() {
 
       {result && displayPack && !busy && <section id="revision-pack" className="revision-pack">
         <div className="pack-header">
-          <div className="print-brand print-only"><span><GraduationCap size={21} /></span><strong>ExamSprint AI</strong><em>Revision Pack</em></div>
+          <div className="print-brand print-only"><CognoteMark /><strong>Cognote</strong><em>Revision Pack</em></div>
           <div className="pack-header-actions"><button className="back-button" onClick={() => document.querySelector(".builder-card")?.scrollIntoView({ behavior: "smooth" })}><ArrowLeft size={15} /> New lecture</button><div className="pack-action-group"><button className={`save-library-button ${saveStatus === "saved" || currentSavedId ? "saved" : ""}`} onClick={() => user ? void saveCurrentToLibrary() : openAuth("save")} disabled={saveStatus === "saving" || Boolean(currentSavedId)}>{saveStatus === "saving" ? <LoaderCircle className="spin" size={16} /> : saveStatus === "saved" || currentSavedId ? <Check size={16} /> : <Save size={16} />}{saveStatus === "saving" ? "Saving..." : saveStatus === "saved" || currentSavedId ? "Saved to My Library" : "Save to My Library"}</button><button className="cram-button" onClick={() => { setCramIndex(0); setCramOpen(true); }}><Brain size={16} /> Start Cram Mode</button><button className="export-button" onClick={exportPack}><Printer size={16} /> Export Revision Pack</button></div></div>
           <div className="learning-tools" aria-label="Revision tools">
             <button type="button" className="tool-button" onClick={() => document.getElementById("visual-summary")?.scrollIntoView({ behavior: "smooth", block: "start" })}><GitFork size={16} /> Visual Summary</button>
@@ -563,11 +592,20 @@ export default function ExamSprint() {
         </div>
       </section>}
     </main>
-    <footer><span>ExamSprint AI</span><p>Study the signal. Skip the noise.</p><span>Powered by Gemini</span></footer>
+    <footer><span>Cognote</span><p>Turn lectures into understanding.</p><span>Powered by Gemini</span></footer>
+
+    {helpOpen && <div className="help-overlay" onMouseDown={event => { if (event.target === event.currentTarget) setHelpOpen(false); }}><section className="help-coach" role="dialog" aria-modal="true" aria-labelledby="help-title"><header><CognoteMark /><div><h2 id="help-title">A little guidance.</h2><p>Your quick guide to Cognote</p></div><button aria-label="Close Help & Guide" onClick={() => setHelpOpen(false)}><X size={20} /></button></header><div className="coach-greeting">Hi! Start with one lecture. I’ll help you find your way around your revision workspace.</div><div className="help-questions">{[
+      ["How do I upload a lecture?", "Drop a PDF into the upload area, add your subject, choose a question style, and select Build My Revision Pack. PDFs can be up to 4 MB."],
+      ["What is Source Lens?", "Select a source-page badge to inspect that page in your original uploaded lecture. Sample packs do not include an original PDF."],
+      ["What is Cram Mode?", "A focused card-by-card review of your existing notes. Use the arrow keys to move and Escape to close. Perfect for one last revision pass."],
+      ["How do I save my revision?", "Choose Save to My Library and sign in. Your notes and original PDF are saved privately, ready to reopen across devices."],
+      ["How do I use Hindi Mode?", "Select हिंदी in the revision toolbar. The first translation takes a moment; switching back to English restores your original pack."],
+      ["How do I export?", "Select Export Revision Pack, then Save as PDF in your browser’s print dialog. The document includes all five questions, answers, and explanations."],
+    ].map(([question, answer]) => <details key={question}><summary>{question}<ChevronRight size={15} /></summary><p>{answer}</p></details>)}</div><div className="help-actions"><button onClick={() => navigateSection("new-revision")}><UploadCloud size={15} /> Upload Lecture</button><button onClick={() => { setHelpOpen(false); user ? void loadLibrary() : openAuth("library"); }}><Library size={15} /> Open Library</button><button disabled={!result || busy} onClick={() => { setHelpOpen(false); setCramIndex(0); setCramOpen(true); }}><Brain size={15} /> Cram Mode</button><button disabled={!result || busy} onClick={() => { setHelpOpen(false); exportPack(); }}><Printer size={15} /> Export</button></div><small>Quick answers, always available. No AI request needed.</small></section></div>}
 
     {authOpen && <div className="auth-overlay" onMouseDown={event => { if (event.target === event.currentTarget) setAuthOpen(false); }}>
       <section className="auth-modal" role="dialog" aria-modal="true" aria-labelledby="auth-title">
-        <header><div><span><Cloud size={19} /></span><div><strong id="auth-title">{authMode === "sign-in" ? "Sign in to ExamSprint" : "Create your account"}</strong><small>Your study flow always works without an account.</small></div></div><button type="button" onClick={() => setAuthOpen(false)} aria-label="Close account dialog"><X size={20} /></button></header>
+        <header><div><span><Cloud size={19} /></span><div><strong id="auth-title">{authMode === "sign-in" ? "Welcome to Cognote" : "Your learning, everywhere"}</strong><small>Save your revision packs across devices.</small></div></div><button type="button" onClick={() => setAuthOpen(false)} aria-label="Close account dialog"><X size={20} /></button></header>
         <div className="auth-tabs"><button type="button" className={authMode === "sign-in" ? "active" : ""} onClick={() => { setAuthMode("sign-in"); setAuthError(""); setAuthMessage(""); }}>Sign In</button><button type="button" className={authMode === "sign-up" ? "active" : ""} onClick={() => { setAuthMode("sign-up"); setAuthError(""); setAuthMessage(""); }}>Sign Up</button></div>
         <form onSubmit={event => { event.preventDefault(); void submitAuth(); }}><label><span>Email</span><div><Mail size={16} /><input type="email" value={authEmail} onChange={event => setAuthEmail(event.target.value)} placeholder="you@example.com" autoComplete="email" required /></div></label><label><span>Password</span><div><LockKeyhole size={16} /><input type="password" value={authPassword} onChange={event => setAuthPassword(event.target.value)} placeholder="At least 6 characters" autoComplete={authMode === "sign-in" ? "current-password" : "new-password"} minLength={6} required /></div></label>{authError && <p className="auth-feedback error"><AlertTriangle size={15} /> {authError}</p>}{authMessage && <p className="auth-feedback success"><CheckCircle2 size={15} /> {authMessage}</p>}<button className="auth-submit" type="submit" disabled={authBusy}>{authBusy ? <LoaderCircle className="spin" size={17} /> : authMode === "sign-in" ? <LogIn size={17} /> : <UserRound size={17} />}{authBusy ? "Please wait..." : authMode === "sign-in" ? "Sign In" : "Create Account"}</button></form>
         <p className="auth-guest-note">Guest mode stays available. Signing in only enables private cloud storage and cross-device history.</p>
