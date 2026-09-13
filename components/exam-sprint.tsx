@@ -10,9 +10,13 @@ const MAX_BYTES = 4 * 1024 * 1024;
 const processingSteps = ["Reading lecture material...", "Finding exam-worthy concepts...", "Removing low-value information...", "Building revision sheet...", "Generating practice questions..."];
 
 interface StoredPack { pack: StudyPack; course: string; fileName: string; questionStyle: QuestionStyle; isSample: boolean; createdAt: string }
+interface CramCard { label: string; title: string; body: string; secondary?: string; sourcePage: number | null }
 
-function PageSource({ page }: { page: number | null }) {
-  return page ? <span className="source-pill"><FileText size={12} /> Source: Page {page}</span> : null;
+function PageSource({ page, onOpen }: { page: number | null; onOpen?: (page: number) => void }) {
+  if (!page) return null;
+  return onOpen
+    ? <button type="button" className="source-pill source-link" onClick={() => onOpen(page)} aria-label={`Open source page ${page}`}><FileText size={12} /> Source: Page {page}</button>
+    : <span className="source-pill"><FileText size={12} /> Source: Page {page}</span>;
 }
 
 export default function ExamSprint() {
@@ -28,6 +32,11 @@ export default function ExamSprint() {
   const [elapsed, setElapsed] = useState(0);
   const [answers, setAnswers] = useState<Record<number, number>>({});
   const [activeQuestion, setActiveQuestion] = useState(0);
+  const [sourceFile, setSourceFile] = useState<File | null>(null);
+  const [sourcePdfUrl, setSourcePdfUrl] = useState<string | null>(null);
+  const [sourcePage, setSourcePage] = useState<number | null>(null);
+  const [cramOpen, setCramOpen] = useState(false);
+  const [cramIndex, setCramIndex] = useState(0);
 
   useEffect(() => {
     try {
@@ -48,6 +57,13 @@ export default function ExamSprint() {
     return () => clearInterval(timer);
   }, [busy]);
 
+  useEffect(() => {
+    if (!sourceFile) { setSourcePdfUrl(null); return; }
+    const objectUrl = URL.createObjectURL(sourceFile);
+    setSourcePdfUrl(objectUrl);
+    return () => URL.revokeObjectURL(objectUrl);
+  }, [sourceFile]);
+
   function chooseFile(next: File | undefined) {
     setError("");
     if (!next) return;
@@ -62,12 +78,13 @@ export default function ExamSprint() {
   }
 
   function store(next: StoredPack) {
-    setResult(next); setAnswers({}); setActiveQuestion(0);
+    setResult(next); setAnswers({}); setActiveQuestion(0); setSourcePage(null); setCramOpen(false); setCramIndex(0);
     try { localStorage.setItem(STORE_KEY, JSON.stringify(next)); } catch { /* The current session remains usable. */ }
   }
 
   function loadSample() {
     setError(""); setCourse("Operating Systems"); setQuestionStyle("University Theory");
+    setSourceFile(null);
     store({ pack: samplePack, course: "Operating Systems", fileName: "OS_Process_Management_Lecture.pdf", questionStyle: "University Theory", isSample: true, createdAt: new Date().toISOString() });
     requestAnimationFrame(() => document.getElementById("revision-pack")?.scrollIntoView({ behavior: "smooth", block: "start" }));
   }
@@ -86,6 +103,7 @@ export default function ExamSprint() {
       let pack: StudyPack;
       try { pack = parseStudyPack(isRecord(data) ? data.pack : null); } catch { throw new Error("The AI response was incomplete. Please try again; your previous pack is safe."); }
       store({ pack, course: course.trim(), fileName: file.name, questionStyle, isSample: false, createdAt: new Date().toISOString() });
+      setSourceFile(file);
       requestAnimationFrame(() => document.getElementById("revision-pack")?.scrollIntoView({ behavior: "smooth", block: "start" }));
     } catch (problem) {
       if (abort.signal.aborted) setError(abort.signal.reason === "cancel" ? "Processing canceled. Your previous revision pack is safe." : "Processing took too long. Try a shorter PDF or use the sample lecture.");
@@ -96,6 +114,37 @@ export default function ExamSprint() {
   const completedSteps = Math.min(4, Math.floor(elapsed / 6));
   const answeredCount = Object.keys(answers).length;
   const score = Object.entries(answers).filter(([index, answer]) => result && result.pack.quiz[Number(index)].correctIndex === answer).length;
+  const scoreMessage = score === 5 ? "Excellent — you nailed this lecture." : score === 4 ? "Almost exam-ready." : score === 3 ? "Good start — review the key concepts once more." : "Take another quick revision pass and retry.";
+  const cramCards: CramCard[] = result ? [
+    { label: "60-SECOND REVISION", title: result.pack.title, body: result.pack.summary, sourcePage: null },
+    ...result.pack.highYieldTopics.map(item => ({ label: `${item.importance.toUpperCase()}-YIELD CONCEPT`, title: item.topic, body: item.explanation, sourcePage: item.sourcePage })),
+    ...result.pack.mustRemember.map((item, index) => ({ label: `MUST REMEMBER ${String(index + 1).padStart(2, "0")}`, title: "Lock this in", body: item.text, sourcePage: item.sourcePage })),
+    ...result.pack.commonTraps.map(trap => ({ label: "COMMON TRAP", title: trap.mistake, body: trap.correction, secondary: "Correct understanding", sourcePage: null })),
+  ] : [];
+
+  useEffect(() => {
+    if (!sourcePage && !cramOpen) return;
+    const previousOverflow = document.body.style.overflow;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        if (sourcePage) setSourcePage(null);
+        else setCramOpen(false);
+      } else if (cramOpen && !sourcePage && event.key === "ArrowRight") {
+        setCramIndex(index => Math.min(cramCards.length, index + 1));
+      } else if (cramOpen && !sourcePage && event.key === "ArrowLeft") {
+        setCramIndex(index => Math.max(0, index - 1));
+      }
+    };
+    document.body.style.overflow = "hidden";
+    window.addEventListener("keydown", onKeyDown);
+    return () => { document.body.style.overflow = previousOverflow; window.removeEventListener("keydown", onKeyDown); };
+  }, [cramCards.length, cramOpen, sourcePage]);
+
+  function retryQuiz() { setAnswers({}); setActiveQuestion(0); }
+  function goToQuiz() {
+    setCramOpen(false);
+    requestAnimationFrame(() => document.getElementById("practice-quiz")?.scrollIntoView({ behavior: "smooth", block: "start" }));
+  }
 
   function exportPack() {
     if (!result) return;
@@ -143,21 +192,33 @@ export default function ExamSprint() {
       {result && !busy && <section id="revision-pack" className="revision-pack">
         <div className="pack-header">
           <div className="print-brand print-only"><span><GraduationCap size={21} /></span><strong>ExamSprint AI</strong><em>Revision Pack</em></div>
-          <div className="pack-header-actions"><button className="back-button" onClick={() => document.querySelector(".builder-card")?.scrollIntoView({ behavior: "smooth" })}><ArrowLeft size={15} /> New lecture</button><button className="export-button" onClick={exportPack}><Printer size={16} /> Export Revision Pack</button></div>
+          <div className="pack-header-actions"><button className="back-button" onClick={() => document.querySelector(".builder-card")?.scrollIntoView({ behavior: "smooth" })}><ArrowLeft size={15} /> New lecture</button><div className="pack-action-group"><button className="cram-button" onClick={() => { setCramIndex(0); setCramOpen(true); }}><Brain size={16} /> Start Cram Mode</button><button className="export-button" onClick={exportPack}><Printer size={16} /> Export Revision Pack</button></div></div>
           <div className="pack-title"><div><span className={`result-badge ${result.isSample ? "sample" : ""}`}><Sparkles size={12} /> {result.isSample ? "SAMPLE REVISION PACK" : "AI REVISION PACK"}</span><h2>{result.pack.title}</h2><p>{result.course} <span>·</span> {result.questionStyle} <span>·</span> {result.fileName}</p></div><div className="pack-score"><strong>{answeredCount}<span>/5</span></strong><small>questions answered</small></div></div>
         </div>
 
         <div className="pack-layout">
           <div className="pack-main">
-            <section className="content-section high-yield"><div className="content-heading"><span className="heading-icon fire"><Flame size={18} /></span><div><span>01 · PRIORITY TOPICS</span><h3>High-Yield Concepts</h3></div><small>{result.pack.highYieldTopics.length} concepts</small></div><div className="concept-grid">{result.pack.highYieldTopics.map((item, index) => <article key={`${item.topic}-${index}`}><div className="concept-top"><span>{String(index + 1).padStart(2, "0")}</span><span className={`importance ${item.importance}`}>{item.importance} yield</span></div><h4>{item.topic}</h4><p>{item.explanation}</p><PageSource page={item.sourcePage} /></article>)}</div></section>
+            <section className="content-section high-yield"><div className="content-heading"><span className="heading-icon fire"><Flame size={18} /></span><div><span>01 · PRIORITY TOPICS</span><h3>High-Yield Concepts</h3></div><small>{result.pack.highYieldTopics.length} concepts</small></div><div className="concept-grid">{result.pack.highYieldTopics.map((item, index) => <article key={`${item.topic}-${index}`}><div className="concept-top"><span>{String(index + 1).padStart(2, "0")}</span><span className={`importance ${item.importance}`}>{item.importance} yield</span></div><h4>{item.topic}</h4><p>{item.explanation}</p><PageSource page={item.sourcePage} onOpen={setSourcePage} /></article>)}</div></section>
 
             <section className="content-section quick-revision"><div className="content-heading"><span className="heading-icon bolt"><Zap size={18} /></span><div><span>02 · RAPID RECALL</span><h3>60-Second Revision</h3></div></div><div className="summary-callout"><span className="quote">“</span><p>{result.pack.summary}</p></div><div className="rapid-list">{result.pack.highYieldTopics.slice(0, 5).map((item, index) => <div key={item.topic}><CheckCircle2 size={16} /><p><strong>{item.topic}:</strong> {item.explanation}</p><span>{String(index + 1).padStart(2, "0")}</span></div>)}</div></section>
 
-            <section className="content-section"><div className="content-heading"><span className="heading-icon remember"><Brain size={18} /></span><div><span>03 · LOCK IT IN</span><h3>Must Remember</h3></div><small>{result.pack.mustRemember.length} essentials</small></div><div className="remember-list">{result.pack.mustRemember.map((item, index) => <article key={index}><span className="remember-number">{String(index + 1).padStart(2, "0")}</span><p>{item.text}</p><PageSource page={item.sourcePage} /></article>)}</div></section>
+            <section className="content-section"><div className="content-heading"><span className="heading-icon remember"><Brain size={18} /></span><div><span>03 · LOCK IT IN</span><h3>Must Remember</h3></div><small>{result.pack.mustRemember.length} essentials</small></div><div className="remember-list">{result.pack.mustRemember.map((item, index) => <article key={index}><span className="remember-number">{String(index + 1).padStart(2, "0")}</span><p>{item.text}</p><PageSource page={item.sourcePage} onOpen={setSourcePage} /></article>)}</div></section>
 
             <section className="content-section traps"><div className="content-heading"><span className="heading-icon warning"><AlertTriangle size={18} /></span><div><span>04 · DON’T LOSE MARKS</span><h3>Common Traps</h3></div></div><div className="trap-list">{result.pack.commonTraps.map((trap, index) => <article key={index}><div className="trap-side"><X size={15} /><span>COMMON MISTAKE</span><p>{trap.mistake}</p></div><ChevronRight size={19} /><div className="trap-side correction"><Check size={15} /><span>GET IT RIGHT</span><p>{trap.correction}</p></div></article>)}</div></section>
 
-            <section className="content-section quiz-section"><div className="content-heading"><span className="heading-icon quiz"><Target size={18} /></span><div><span>05 · TEST YOURSELF</span><h3>Practice Quiz</h3></div><small>{answeredCount === 5 ? `${score}/5 correct` : `${answeredCount}/5 answered`}</small></div><div className="quiz-progress" role="progressbar" aria-valuemin={0} aria-valuemax={5} aria-valuenow={answeredCount}><span style={{ width: `${answeredCount * 20}%` }} /></div><div className="question-tabs">{result.pack.quiz.map((question, index) => <button key={index} onClick={() => setActiveQuestion(index)} aria-label={`Question ${index + 1}`} className={`${activeQuestion === index ? "active" : ""} ${answers[index] !== undefined ? (answers[index] === question.correctIndex ? "correct" : "wrong") : ""}`}>{answers[index] !== undefined ? answers[index] === question.correctIndex ? <Check size={14} /> : <X size={14} /> : index + 1}</button>)}</div>{result.pack.quiz.map((question, questionIndex) => questionIndex === activeQuestion && <article className="question-card" key={questionIndex}><div className="question-meta"><span>QUESTION {questionIndex + 1} OF 5</span><PageSource page={question.sourcePage} /></div><h4>{question.question}</h4><div className="options">{question.options.map((option, optionIndex) => { const answered = answers[questionIndex] !== undefined; const selected = answers[questionIndex] === optionIndex; const correct = question.correctIndex === optionIndex; return <button key={optionIndex} disabled={answered} onClick={() => setAnswers(previous => ({ ...previous, [questionIndex]: optionIndex }))} className={`${selected ? "selected" : ""} ${answered && correct ? "correct" : ""} ${answered && selected && !correct ? "wrong" : ""}`}><span>{String.fromCharCode(65 + optionIndex)}</span><p>{option}</p>{answered && correct && <CheckCircle2 size={18} />}{answered && selected && !correct && <X size={18} />}</button>; })}</div>{answers[questionIndex] !== undefined && <div className={`answer-panel ${answers[questionIndex] === question.correctIndex ? "correct" : "wrong"}`}><div className="answer-status">{answers[questionIndex] === question.correctIndex ? <CheckCircle2 size={21} /> : <X size={21} />}<strong>{answers[questionIndex] === question.correctIndex ? "Correct" : "Incorrect"}</strong></div><p><span>Correct answer</span>{String.fromCharCode(65 + question.correctIndex)}. {question.options[question.correctIndex]}</p><p><span>Why</span>{question.explanation}</p><PageSource page={question.sourcePage} /></div>}<div className="quiz-nav"><button disabled={questionIndex === 0} onClick={() => setActiveQuestion(questionIndex - 1)}><ArrowLeft size={14} /> Previous</button>{questionIndex < 4 ? <button onClick={() => setActiveQuestion(questionIndex + 1)}>Next question <ChevronRight size={14} /></button> : answeredCount === 5 ? <button onClick={() => { setAnswers({}); setActiveQuestion(0); }}><RotateCcw size={14} /> Try again</button> : null}</div></article>)}</section>
+            <section id="practice-quiz" className="content-section quiz-section">
+              <div className="content-heading"><span className="heading-icon quiz"><Target size={18} /></span><div><span>05 · TEST YOURSELF</span><h3>Practice Quiz</h3></div><small>{answeredCount === 5 ? `${score}/5 correct` : `${answeredCount}/5 answered`}</small></div>
+              <div className="quiz-progress" role="progressbar" aria-valuemin={0} aria-valuemax={5} aria-valuenow={answeredCount}><span style={{ width: `${answeredCount * 20}%` }} /></div>
+              <div className="question-tabs">{result.pack.quiz.map((question, index) => <button key={index} onClick={() => setActiveQuestion(index)} aria-label={`Question ${index + 1}`} className={`${activeQuestion === index ? "active" : ""} ${answers[index] !== undefined ? (answers[index] === question.correctIndex ? "correct" : "wrong") : ""}`}>{answers[index] !== undefined ? answers[index] === question.correctIndex ? <Check size={14} /> : <X size={14} /> : index + 1}</button>)}</div>
+              {result.pack.quiz.map((question, questionIndex) => questionIndex === activeQuestion && <article className="question-card" key={questionIndex}>
+                <div className="question-meta"><span>QUESTION {questionIndex + 1} OF 5</span><PageSource page={question.sourcePage} onOpen={setSourcePage} /></div>
+                <h4>{question.question}</h4>
+                <div className="options">{question.options.map((option, optionIndex) => { const answered = answers[questionIndex] !== undefined; const selected = answers[questionIndex] === optionIndex; const correct = question.correctIndex === optionIndex; return <button key={optionIndex} disabled={answered} onClick={() => setAnswers(previous => ({ ...previous, [questionIndex]: optionIndex }))} className={`${selected ? "selected" : ""} ${answered && correct ? "correct" : ""} ${answered && selected && !correct ? "wrong" : ""}`}><span>{String.fromCharCode(65 + optionIndex)}</span><p>{option}</p>{answered && correct && <CheckCircle2 size={18} />}{answered && selected && !correct && <X size={18} />}</button>; })}</div>
+                {answers[questionIndex] !== undefined && <div className={`answer-panel ${answers[questionIndex] === question.correctIndex ? "correct" : "wrong"}`}><div className="answer-status">{answers[questionIndex] === question.correctIndex ? <CheckCircle2 size={21} /> : <X size={21} />}<strong>{answers[questionIndex] === question.correctIndex ? "Correct" : "Incorrect"}</strong></div><p><span>Correct answer</span>{String.fromCharCode(65 + question.correctIndex)}. {question.options[question.correctIndex]}</p><p><span>Why</span>{question.explanation}</p><PageSource page={question.sourcePage} onOpen={setSourcePage} /></div>}
+                <div className="quiz-nav"><button disabled={questionIndex === 0} onClick={() => setActiveQuestion(questionIndex - 1)}><ArrowLeft size={14} /> Previous</button>{questionIndex < 4 ? <button onClick={() => setActiveQuestion(questionIndex + 1)}>Next question <ChevronRight size={14} /></button> : null}</div>
+              </article>)}
+              {answeredCount === 5 && <div className="quiz-complete" aria-live="polite"><span className="quiz-complete-icon"><CheckCircle2 size={25} /></span><div className="quiz-complete-copy"><span>REVISION CHECK COMPLETE</span><h4>{score} <small>/ 5</small></h4><strong>{score * 20}%</strong><p>{scoreMessage}</p></div><button type="button" onClick={retryQuiz}><RotateCcw size={15} /> Retry Quiz</button></div>}
+            </section>
 
             <section className="print-quiz print-only" aria-hidden="true">
               <div className="print-section-title"><span>05</span><div><small>TEST YOURSELF</small><h3>Practice Quiz &amp; Answer Key</h3></div></div>
@@ -175,5 +236,25 @@ export default function ExamSprint() {
       </section>}
     </main>
     <footer><span>ExamSprint AI</span><p>Study the signal. Skip the noise.</p><span>Powered by Gemini</span></footer>
+
+    {cramOpen && result && <div className="cram-overlay" onMouseDown={event => { if (event.target === event.currentTarget) setCramOpen(false); }}>
+      <section className="cram-shell" role="dialog" aria-modal="true" aria-labelledby="cram-title">
+        <header className="cram-header"><div><span><Brain size={17} /></span><div><strong id="cram-title">Cram Mode</strong><small>{result.course}</small></div></div><button type="button" onClick={() => setCramOpen(false)} aria-label="Close Cram Mode"><X size={20} /></button></header>
+        <div className="cram-progress"><span style={{ width: `${((Math.min(cramIndex, cramCards.length) + 1) / (cramCards.length + 1)) * 100}%` }} /></div>
+        {cramIndex < cramCards.length ? <div className="cram-stage">
+          <div className="cram-count">{cramIndex + 1} / {cramCards.length}</div>
+          <article className="cram-card"><span>{cramCards[cramIndex].label}</span><h2>{cramCards[cramIndex].title}</h2>{cramCards[cramIndex].secondary && <small>{cramCards[cramIndex].secondary}</small>}<p>{cramCards[cramIndex].body}</p><PageSource page={cramCards[cramIndex].sourcePage} onOpen={setSourcePage} /></article>
+        </div> : <div className="cram-stage cram-finish"><span className="cram-finish-icon"><Target size={30} /></span><small>REVISION PASS COMPLETE</small><h2>Ready to test your recall?</h2><p>You’ve reviewed the condensed notes. Finish with the five-question practice quiz.</p><button type="button" onClick={goToQuiz}><Target size={17} /> Go to Practice Quiz</button></div>}
+        <footer className="cram-nav"><button type="button" onClick={() => setCramIndex(index => Math.max(0, index - 1))} disabled={cramIndex === 0}><ArrowLeft size={16} /> Previous</button><span>Use ← → keys to move · Esc to close</span>{cramIndex < cramCards.length ? <button type="button" onClick={() => setCramIndex(index => Math.min(cramCards.length, index + 1))}>Next <ChevronRight size={16} /></button> : <button type="button" onClick={goToQuiz}>Quiz <ChevronRight size={16} /></button>}</footer>
+      </section>
+    </div>}
+
+    {sourcePage && <div className="source-lens-overlay" onMouseDown={event => { if (event.target === event.currentTarget) setSourcePage(null); }}>
+      <section className="source-lens" role="dialog" aria-modal="true" aria-labelledby="source-lens-title">
+        <header><div><span><FileText size={19} /></span><div><strong id="source-lens-title">Source Lens</strong><small>Viewing original lecture — Page {sourcePage}</small></div></div><button type="button" onClick={() => setSourcePage(null)} aria-label="Close Source Lens"><X size={20} /></button></header>
+        {sourcePdfUrl && !result?.isSample ? <iframe key={`${sourcePdfUrl}-${sourcePage}`} src={`${sourcePdfUrl}#page=${sourcePage}&view=FitH`} title={`Original lecture PDF at page ${sourcePage}`} /> : <div className="source-unavailable"><span><FileText size={31} /></span><h3>Original lecture not attached</h3><p>Original PDF preview is available for uploaded lectures.</p></div>}
+        <footer><span>Page {sourcePage}</span>{sourcePdfUrl && !result?.isSample ? <a href={`${sourcePdfUrl}#page=${sourcePage}`} target="_blank" rel="noreferrer">Open full document <ChevronRight size={14} /></a> : null}</footer>
+      </section>
+    </div>}
   </div>;
 }
