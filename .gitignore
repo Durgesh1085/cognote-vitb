@@ -1,0 +1,16 @@
+node_modules/
+.next/
+.env
+.env.local
+.env.*
+!.env.example
+*.log
+*.tsbuildinfo
+.vercel/
+.turbo/
+coverage/
+tmp/
+*.pdf
+*.mp4
+*.mov
+*.webm
