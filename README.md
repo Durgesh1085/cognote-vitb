@@ -39,23 +39,26 @@ npm start
 2. Show High-Yield Concepts, page-grounded Must Remember points, and Common Traps.
 3. Answer a quiz question. The answer stays hidden until selection, then shows Correct/Incorrect, the correct answer, explanation, and source page.
 4. Complete all five questions to show the final score.
-5. Click **Export Revision Pack**, then choose **Save as PDF** in the browser print dialog. The print version includes all five answers and explanations.
-6. For the live flow, upload a PDF up to 4 MB, enter its course, select a question style, and click **Build My Revision Pack**.
+5. Open **Visual Summary**, start **Cram Mode**, or use the browser-native **Read Aloud** controls.
+6. Switch to **हिंदी** for a faithful, cached translation of the current pack; switch back to restore the exact English original.
+7. Click **Export Revision Pack**, then choose **Save as PDF** in the browser print dialog. The print version includes all five answers and explanations.
+8. For the live flow, upload a PDF up to 4 MB, enter its course, select a question style, and click **Build My Revision Pack**.
 
 Live failures remain visible and never silently fall back to sample content.
 
 ## Implementation
 
 - Next.js App Router, TypeScript, React, Tailwind CSS, Lucide React.
-- Official `@google/genai` SDK used only by `POST /api/study-pack`; the API key remains server-side.
+- Official `@google/genai` SDK used only in server routes: `POST /api/study-pack` for grounded generation and `POST /api/translate-pack` for faithful Hindi translation of an existing pack.
 - Structured JSON requested with `responseMimeType` and `responseJsonSchema`; see the [official SDK reference](https://googleapis.github.io/js-genai/release_docs/interfaces/types.GenerateContentConfig.html).
 - PDF bytes are sent directly to Gemini as inline PDF data. There are no embeddings, vector database, RAG framework, or document index.
 - Shared TypeScript interfaces and runtime validation enforce complete fields, four options per question, valid answer indexes, and exactly five questions.
 - Client and server file checks, a 50-second request bound, cancellation, quota/configuration/network errors, and a multi-step processing state.
 - The most recent generated pack is saved in localStorage. Malformed saved data is removed safely.
 - Optional email/password accounts can save the complete pack and original PDF to a private, RLS-protected Supabase library without changing the Gemini flow.
+- The visual concept map and browser-native speech controls use existing pack data without additional AI calls; Hindi translation is cached in memory for the current pack.
 - A dedicated light print layout creates a complete shareable pack through the browser's native print/save-as-PDF flow; no PDF runtime dependency is required.
-- No database, authentication, analytics, external fonts, or additional services.
+- No RAG, embeddings, vector database, external TTS, analytics, or external fonts.
 
 ## Environment variables
 
@@ -80,6 +83,7 @@ The lockfile records exact installed versions for reproducible installation with
 - Live processing requires a valid Gemini key, model access, connectivity, and quota. A key is intentionally not bundled.
 - The deployed MVP accepts PDFs up to 4 MB to remain within Vercel Function request limits. Very long or image-heavy files may also exceed model limits or time out.
 - Source page numbers are model-extracted and should be checked against the PDF for high-stakes study. They are omitted when the model cannot locate a page.
-- Only the latest revision pack is retained in this browser; the original PDF is not stored.
+- The latest revision pack is retained locally for guest use; signed-in users can optionally store packs and original PDFs in their private Supabase library.
 - Cancel stops the browser from waiting; an already-started Gemini request may still complete and incur usage.
-- This local hackathon app has no authentication or distributed rate limiting. Add access controls before exposing a paid API key through a public deployment.
+- Browser speech availability and installed English/Hindi voices vary by browser and operating system.
+- Public deployment should add platform-level rate limiting before exposing a paid Gemini quota to untrusted traffic.

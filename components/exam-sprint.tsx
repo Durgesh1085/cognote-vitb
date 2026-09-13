@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState, type DragEvent } from "react";
 import type { User } from "@supabase/supabase-js";
-import { AlertTriangle, ArrowLeft, BookOpen, Brain, Check, CheckCircle2, ChevronRight, Circle, Cloud, FileText, Flame, FolderOpen, GraduationCap, Layers3, Library, LoaderCircle, LockKeyhole, LogIn, LogOut, Mail, Printer, RotateCcw, Save, ShieldCheck, Sparkles, Target, Trash2, UploadCloud, UserRound, X, Zap } from "lucide-react";
+import { AlertTriangle, ArrowLeft, BookOpen, Brain, Check, CheckCircle2, ChevronRight, Circle, Cloud, FileText, Flame, FolderOpen, GitFork, GraduationCap, Languages, Layers3, Library, LoaderCircle, LockKeyhole, LogIn, LogOut, Mail, Pause, Play, Printer, RotateCcw, Save, ShieldCheck, Sparkles, Square, Target, Trash2, UploadCloud, UserRound, Volume2, X, Zap } from "lucide-react";
 import { samplePack } from "@/lib/sample-pack";
 import { isQuestionStyle, isRecord, parseStudyPack, type QuestionStyle, type StudyPack } from "@/lib/study-pack";
 import { getSupabaseBrowserClient } from "@/lib/supabase/client";
@@ -30,6 +30,10 @@ function safePdfName(name: string) {
   return normalized.toLowerCase().endsWith(".pdf") ? normalized : `${normalized}.pdf`;
 }
 
+function compactText(value: string, max = 105) {
+  return value.length <= max ? value : `${value.slice(0, max - 1).trimEnd()}…`;
+}
+
 function PageSource({ page, onOpen }: { page: number | null; onOpen?: (page: number) => void }) {
   if (!page) return null;
   return onOpen
@@ -41,6 +45,7 @@ export default function ExamSprint() {
   const supabase = getSupabaseBrowserClient();
   const inputRef = useRef<HTMLInputElement>(null);
   const controller = useRef<AbortController | null>(null);
+  const speechRef = useRef<SpeechSynthesisUtterance | null>(null);
   const [file, setFile] = useState<File | null>(null);
   const [course, setCourse] = useState("Operating Systems");
   const [questionStyle, setQuestionStyle] = useState<QuestionStyle>("University Theory");
@@ -78,6 +83,13 @@ export default function ExamSprint() {
   const [cloudPdfUrl, setCloudPdfUrl] = useState<string | null>(null);
   const [sourceLoading, setSourceLoading] = useState(false);
   const [sourceError, setSourceError] = useState("");
+  const [language, setLanguage] = useState<"en" | "hi">("en");
+  const [hindiPack, setHindiPack] = useState<StudyPack | null>(null);
+  const [translationStatus, setTranslationStatus] = useState<"idle" | "loading" | "error">("idle");
+  const [translationError, setTranslationError] = useState("");
+  const [speechSupported, setSpeechSupported] = useState(false);
+  const [speechStatus, setSpeechStatus] = useState<"idle" | "playing" | "paused">("idle");
+  const [speechMessage, setSpeechMessage] = useState("");
 
   useEffect(() => {
     try {
@@ -117,6 +129,8 @@ export default function ExamSprint() {
     return () => URL.revokeObjectURL(objectUrl);
   }, [sourceFile]);
 
+  useEffect(() => { setSpeechSupported(typeof window !== "undefined" && "speechSynthesis" in window && "SpeechSynthesisUtterance" in window); }, []);
+
   function chooseFile(next: File | undefined) {
     setError("");
     if (!next) return;
@@ -133,6 +147,7 @@ export default function ExamSprint() {
   function store(next: StoredPack) {
     setResult(next); setAnswers({}); setActiveQuestion(0); setSourcePage(null); setCramOpen(false); setCramIndex(0);
     setCurrentSavedId(null); setCurrentPdfPath(null); setCloudPdfUrl(null); setSaveStatus("idle"); setCloudNotice(null);
+    setLanguage("en"); setHindiPack(null); setTranslationStatus("idle"); setTranslationError("");
     try { localStorage.setItem(STORE_KEY, JSON.stringify(next)); } catch { /* The current session remains usable. */ }
   }
 
@@ -169,12 +184,19 @@ export default function ExamSprint() {
   const answeredCount = Object.keys(answers).length;
   const score = Object.entries(answers).filter(([index, answer]) => result && result.pack.quiz[Number(index)].correctIndex === answer).length;
   const scoreMessage = score === 5 ? "Excellent — you nailed this lecture." : score === 4 ? "Almost exam-ready." : score === 3 ? "Good start — review the key concepts once more." : "Take another quick revision pass and retry.";
-  const cramCards: CramCard[] = result ? [
-    { label: "60-SECOND REVISION", title: result.pack.title, body: result.pack.summary, sourcePage: null },
-    ...result.pack.highYieldTopics.map(item => ({ label: `${item.importance.toUpperCase()}-YIELD CONCEPT`, title: item.topic, body: item.explanation, sourcePage: item.sourcePage })),
-    ...result.pack.mustRemember.map((item, index) => ({ label: `MUST REMEMBER ${String(index + 1).padStart(2, "0")}`, title: "Lock this in", body: item.text, sourcePage: item.sourcePage })),
-    ...result.pack.commonTraps.map(trap => ({ label: "COMMON TRAP", title: trap.mistake, body: trap.correction, secondary: "Correct understanding", sourcePage: null })),
+  const displayPack = result ? language === "hi" && hindiPack ? hindiPack : result.pack : null;
+  const cramCards: CramCard[] = displayPack ? [
+    { label: "60-SECOND REVISION", title: displayPack.title, body: displayPack.summary, sourcePage: null },
+    ...displayPack.highYieldTopics.map(item => ({ label: `${item.importance.toUpperCase()}-YIELD CONCEPT`, title: item.topic, body: item.explanation, sourcePage: item.sourcePage })),
+    ...displayPack.mustRemember.map((item, index) => ({ label: `MUST REMEMBER ${String(index + 1).padStart(2, "0")}`, title: "Lock this in", body: item.text, sourcePage: item.sourcePage })),
+    ...displayPack.commonTraps.map(trap => ({ label: "COMMON TRAP", title: trap.mistake, body: trap.correction, secondary: "Correct understanding", sourcePage: null })),
   ] : [];
+
+  useEffect(() => () => {
+    if (typeof window !== "undefined" && "speechSynthesis" in window) window.speechSynthesis.cancel();
+    speechRef.current = null;
+    setSpeechStatus("idle");
+  }, [language, result?.createdAt]);
 
   useEffect(() => {
     if (!sourcePage && !cramOpen && !authOpen && !libraryOpen) return;
@@ -356,12 +378,93 @@ export default function ExamSprint() {
   }
 
   function exportPack() {
-    if (!result) return;
+    if (!result || !displayPack) return;
     const originalTitle = document.title;
-    document.title = `${result.pack.title} - ExamSprint AI Revision Pack`;
+    document.title = `${displayPack.title} - ExamSprint AI Revision Pack`;
     const restoreTitle = () => { document.title = originalTitle; window.removeEventListener("afterprint", restoreTitle); };
     window.addEventListener("afterprint", restoreTitle);
     window.print();
+  }
+
+  function stopSpeech() {
+    if (typeof window !== "undefined" && "speechSynthesis" in window) window.speechSynthesis.cancel();
+    speechRef.current = null;
+    setSpeechStatus("idle");
+    setSpeechMessage("");
+  }
+
+  function readAloud() {
+    if (!displayPack || !speechSupported) {
+      setSpeechMessage("Read Aloud is not supported by this browser.");
+      return;
+    }
+    window.speechSynthesis.cancel();
+    const text = [
+      displayPack.title,
+      displayPack.summary,
+      ...displayPack.highYieldTopics.flatMap(item => [item.topic, item.explanation]),
+      ...displayPack.mustRemember.map(item => item.text),
+      ...displayPack.commonTraps.flatMap(item => [`Common trap: ${item.mistake}`, `Correct understanding: ${item.correction}`]),
+    ].join(". ");
+    const utterance = new SpeechSynthesisUtterance(text);
+    utterance.lang = language === "hi" ? "hi-IN" : "en-US";
+    utterance.rate = 0.95;
+    utterance.onend = () => { if (speechRef.current === utterance) { speechRef.current = null; setSpeechStatus("idle"); } };
+    utterance.onerror = event => {
+      if (speechRef.current !== utterance) return;
+      speechRef.current = null;
+      setSpeechStatus("idle");
+      if (event.error !== "canceled" && event.error !== "interrupted") setSpeechMessage("Read Aloud could not start on this browser.");
+    };
+    speechRef.current = utterance;
+    setSpeechMessage("");
+    setSpeechStatus("playing");
+    window.speechSynthesis.speak(utterance);
+  }
+
+  function pauseSpeech() {
+    if (!speechSupported || speechStatus !== "playing") return;
+    window.speechSynthesis.pause();
+    setSpeechStatus("paused");
+  }
+
+  function resumeSpeech() {
+    if (!speechSupported || speechStatus !== "paused") return;
+    window.speechSynthesis.resume();
+    setSpeechStatus("playing");
+  }
+
+  async function switchLanguage(nextLanguage: "en" | "hi") {
+    stopSpeech();
+    if (nextLanguage === "en") { setLanguage("en"); setTranslationError(""); return; }
+    if (!result || translationStatus === "loading") return;
+    if (hindiPack) { setLanguage("hi"); setTranslationError(""); return; }
+    setTranslationStatus("loading"); setTranslationError("");
+    try {
+      const response = await fetch("/api/translate-pack", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ pack: result.pack }),
+      });
+      let data: unknown;
+      try { data = await response.json(); } catch { throw new Error("The translation service returned an unreadable response."); }
+      if (!response.ok) throw new Error(isRecord(data) && typeof data.error === "string" ? data.error : "Hindi translation failed. Please try again.");
+      const translated = parseStudyPack(isRecord(data) ? data.pack : null);
+      const structureMatches = translated.highYieldTopics.length === result.pack.highYieldTopics.length
+        && translated.mustRemember.length === result.pack.mustRemember.length
+        && translated.commonTraps.length === result.pack.commonTraps.length
+        && translated.quiz.length === result.pack.quiz.length
+        && translated.quiz.every((question, index) => question.correctIndex === result.pack.quiz[index].correctIndex
+          && question.options.length === result.pack.quiz[index].options.length
+          && question.sourcePage === result.pack.quiz[index].sourcePage)
+        && translated.highYieldTopics.every((item, index) => item.sourcePage === result.pack.highYieldTopics[index].sourcePage)
+        && translated.mustRemember.every((item, index) => item.sourcePage === result.pack.mustRemember[index].sourcePage);
+      if (!structureMatches) throw new Error("The translation changed protected study-pack data, so it was safely rejected.");
+      setHindiPack(translated); setLanguage("hi"); setTranslationStatus("idle");
+    } catch (translationProblem) {
+      setLanguage("en"); setTranslationStatus("error");
+      setTranslationError(translationProblem instanceof Error ? translationProblem.message : "Hindi translation failed. Please try again.");
+    }
   }
 
   return <div className="site-shell">
@@ -398,29 +501,44 @@ export default function ExamSprint() {
         <div className="processing-copy"><span className="section-number">GEMINI IS STUDYING</span><h2>Turning pages into progress.</h2><p>We’re reading your lecture and keeping every insight grounded in the source.</p><div className="process-list">{processingSteps.map((step, index) => <div className={index <= completedSteps ? "active" : ""} key={step}>{index < completedSteps ? <CheckCircle2 size={19} /> : index === completedSteps ? <LoaderCircle className="spin" size={19} /> : <Circle size={19} />}<span>{step}</span></div>)}</div><div className="processing-progress"><span style={{ width: `${Math.min(94, 12 + elapsed * 2.4)}%` }} /></div><small>{elapsed}s elapsed · usually ready in under a minute</small><button className="cancel-button" onClick={() => controller.current?.abort("cancel")}>Cancel</button></div>
       </section>}
 
-      {result && !busy && <section id="revision-pack" className="revision-pack">
+      {result && displayPack && !busy && <section id="revision-pack" className="revision-pack">
         <div className="pack-header">
           <div className="print-brand print-only"><span><GraduationCap size={21} /></span><strong>ExamSprint AI</strong><em>Revision Pack</em></div>
           <div className="pack-header-actions"><button className="back-button" onClick={() => document.querySelector(".builder-card")?.scrollIntoView({ behavior: "smooth" })}><ArrowLeft size={15} /> New lecture</button><div className="pack-action-group"><button className={`save-library-button ${saveStatus === "saved" || currentSavedId ? "saved" : ""}`} onClick={() => user ? void saveCurrentToLibrary() : openAuth("save")} disabled={saveStatus === "saving" || Boolean(currentSavedId)}>{saveStatus === "saving" ? <LoaderCircle className="spin" size={16} /> : saveStatus === "saved" || currentSavedId ? <Check size={16} /> : <Save size={16} />}{saveStatus === "saving" ? "Saving..." : saveStatus === "saved" || currentSavedId ? "Saved to My Library" : "Save to My Library"}</button><button className="cram-button" onClick={() => { setCramIndex(0); setCramOpen(true); }}><Brain size={16} /> Start Cram Mode</button><button className="export-button" onClick={exportPack}><Printer size={16} /> Export Revision Pack</button></div></div>
-          <div className="pack-title"><div><span className={`result-badge ${result.isSample ? "sample" : ""}`}><Sparkles size={12} /> {result.isSample ? "SAMPLE REVISION PACK" : "AI REVISION PACK"}</span><h2>{result.pack.title}</h2><p>{result.course} <span>·</span> {result.questionStyle} <span>·</span> {result.fileName}</p></div><div className="pack-score"><strong>{answeredCount}<span>/5</span></strong><small>questions answered</small></div></div>
+          <div className="learning-tools" aria-label="Revision tools">
+            <button type="button" className="tool-button" onClick={() => document.getElementById("visual-summary")?.scrollIntoView({ behavior: "smooth", block: "start" })}><GitFork size={16} /> Visual Summary</button>
+            <div className="speech-tools">
+              {speechStatus === "idle" ? <button type="button" className="tool-button" onClick={readAloud} disabled={!speechSupported} title={speechSupported ? "Read revision notes aloud" : "Your browser does not support Read Aloud"}><Volume2 size={16} /> Read Aloud</button> : speechStatus === "playing" ? <button type="button" className="tool-button active" onClick={pauseSpeech}><Pause size={16} /> Pause</button> : <button type="button" className="tool-button active" onClick={resumeSpeech}><Play size={16} /> Resume</button>}
+              {speechStatus !== "idle" && <button type="button" className="tool-icon-button" onClick={stopSpeech} aria-label="Stop Read Aloud" title="Stop"><Square size={14} /></button>}
+            </div>
+            <div className="language-control" aria-label="Revision language"><Languages size={15} /><button type="button" className={language === "en" ? "active" : ""} onClick={() => void switchLanguage("en")}>English</button><button type="button" className={language === "hi" ? "active" : ""} onClick={() => void switchLanguage("hi")} disabled={translationStatus === "loading"}>{translationStatus === "loading" ? <LoaderCircle className="spin" size={13} /> : null} हिंदी</button></div>
+          </div>
+          {(translationError || speechMessage) && <div className="feature-notice" role="status"><AlertTriangle size={15} /><span>{translationError || speechMessage}</span>{translationError && <button type="button" onClick={() => void switchLanguage("hi")}>Retry</button>}</div>}
+          <div className="pack-title"><div><span className={`result-badge ${result.isSample ? "sample" : ""}`}><Sparkles size={12} /> {result.isSample ? "SAMPLE REVISION PACK" : "AI REVISION PACK"}{language === "hi" ? " · हिंदी" : ""}</span><h2>{displayPack.title}</h2><p>{result.course} <span>·</span> {result.questionStyle} <span>·</span> {result.fileName}</p></div><div className="pack-score"><strong>{answeredCount}<span>/5</span></strong><small>questions answered</small></div></div>
         </div>
         {cloudNotice && <div className={`cloud-notice ${cloudNotice.tone}`} role="status">{cloudNotice.tone === "success" ? <CheckCircle2 size={16} /> : <AlertTriangle size={16} />}<span>{cloudNotice.text}</span><button onClick={() => setCloudNotice(null)} aria-label="Dismiss"><X size={14} /></button></div>}
 
         <div className="pack-layout">
           <div className="pack-main">
-            <section className="content-section high-yield"><div className="content-heading"><span className="heading-icon fire"><Flame size={18} /></span><div><span>01 · PRIORITY TOPICS</span><h3>High-Yield Concepts</h3></div><small>{result.pack.highYieldTopics.length} concepts</small></div><div className="concept-grid">{result.pack.highYieldTopics.map((item, index) => <article key={`${item.topic}-${index}`}><div className="concept-top"><span>{String(index + 1).padStart(2, "0")}</span><span className={`importance ${item.importance}`}>{item.importance} yield</span></div><h4>{item.topic}</h4><p>{item.explanation}</p><PageSource page={item.sourcePage} onOpen={setSourcePage} /></article>)}</div></section>
+            <section id="visual-summary" className="content-section visual-summary"><div className="content-heading"><span className="heading-icon map"><GitFork size={18} /></span><div><span>LECTURE AT A GLANCE</span><h3>Visual Summary</h3></div><small>Built from this revision pack</small></div><div className="map-scroll"><div className="concept-map"><div className="map-root"><span>LECTURE</span><strong>{compactText(displayPack.title, 70)}</strong></div><div className="map-branches">
+              <section className="map-branch map-high"><header><Flame size={16} /><span>High-Yield Topics</span></header><div className="map-nodes">{displayPack.highYieldTopics.map((item, index) => <article className="map-node" key={`${item.topic}-${index}`}><strong>{compactText(item.topic, 54)}</strong><p>{compactText(item.explanation)}</p><PageSource page={item.sourcePage} onOpen={setSourcePage} /></article>)}</div></section>
+              <section className="map-branch map-remember"><header><Brain size={16} /><span>Must Remember</span></header><div className="map-nodes">{displayPack.mustRemember.map((item, index) => <article className="map-node" key={index}><strong>Key fact {index + 1}</strong><p>{compactText(item.text)}</p><PageSource page={item.sourcePage} onOpen={setSourcePage} /></article>)}</div></section>
+              <section className="map-branch map-traps"><header><AlertTriangle size={16} /><span>Common Traps</span></header><div className="map-nodes">{displayPack.commonTraps.map((item, index) => <article className="map-node" key={index}><strong>{compactText(item.mistake, 58)}</strong><p>{compactText(item.correction)}</p></article>)}</div></section>
+            </div></div></div></section>
 
-            <section className="content-section quick-revision"><div className="content-heading"><span className="heading-icon bolt"><Zap size={18} /></span><div><span>02 · RAPID RECALL</span><h3>60-Second Revision</h3></div></div><div className="summary-callout"><span className="quote">“</span><p>{result.pack.summary}</p></div><div className="rapid-list">{result.pack.highYieldTopics.slice(0, 5).map((item, index) => <div key={item.topic}><CheckCircle2 size={16} /><p><strong>{item.topic}:</strong> {item.explanation}</p><span>{String(index + 1).padStart(2, "0")}</span></div>)}</div></section>
+            <section className="content-section high-yield"><div className="content-heading"><span className="heading-icon fire"><Flame size={18} /></span><div><span>01 · PRIORITY TOPICS</span><h3>High-Yield Concepts</h3></div><small>{displayPack.highYieldTopics.length} concepts</small></div><div className="concept-grid">{displayPack.highYieldTopics.map((item, index) => <article key={`${item.topic}-${index}`}><div className="concept-top"><span>{String(index + 1).padStart(2, "0")}</span><span className={`importance ${item.importance}`}>{item.importance} yield</span></div><h4>{item.topic}</h4><p>{item.explanation}</p><PageSource page={item.sourcePage} onOpen={setSourcePage} /></article>)}</div></section>
 
-            <section className="content-section"><div className="content-heading"><span className="heading-icon remember"><Brain size={18} /></span><div><span>03 · LOCK IT IN</span><h3>Must Remember</h3></div><small>{result.pack.mustRemember.length} essentials</small></div><div className="remember-list">{result.pack.mustRemember.map((item, index) => <article key={index}><span className="remember-number">{String(index + 1).padStart(2, "0")}</span><p>{item.text}</p><PageSource page={item.sourcePage} onOpen={setSourcePage} /></article>)}</div></section>
+            <section className="content-section quick-revision"><div className="content-heading"><span className="heading-icon bolt"><Zap size={18} /></span><div><span>02 · RAPID RECALL</span><h3>60-Second Revision</h3></div></div><div className="summary-callout"><span className="quote">“</span><p>{displayPack.summary}</p></div><div className="rapid-list">{displayPack.highYieldTopics.slice(0, 5).map((item, index) => <div key={item.topic}><CheckCircle2 size={16} /><p><strong>{item.topic}:</strong> {item.explanation}</p><span>{String(index + 1).padStart(2, "0")}</span></div>)}</div></section>
 
-            <section className="content-section traps"><div className="content-heading"><span className="heading-icon warning"><AlertTriangle size={18} /></span><div><span>04 · DON’T LOSE MARKS</span><h3>Common Traps</h3></div></div><div className="trap-list">{result.pack.commonTraps.map((trap, index) => <article key={index}><div className="trap-side"><X size={15} /><span>COMMON MISTAKE</span><p>{trap.mistake}</p></div><ChevronRight size={19} /><div className="trap-side correction"><Check size={15} /><span>GET IT RIGHT</span><p>{trap.correction}</p></div></article>)}</div></section>
+            <section className="content-section"><div className="content-heading"><span className="heading-icon remember"><Brain size={18} /></span><div><span>03 · LOCK IT IN</span><h3>Must Remember</h3></div><small>{displayPack.mustRemember.length} essentials</small></div><div className="remember-list">{displayPack.mustRemember.map((item, index) => <article key={index}><span className="remember-number">{String(index + 1).padStart(2, "0")}</span><p>{item.text}</p><PageSource page={item.sourcePage} onOpen={setSourcePage} /></article>)}</div></section>
+
+            <section className="content-section traps"><div className="content-heading"><span className="heading-icon warning"><AlertTriangle size={18} /></span><div><span>04 · DON’T LOSE MARKS</span><h3>Common Traps</h3></div></div><div className="trap-list">{displayPack.commonTraps.map((trap, index) => <article key={index}><div className="trap-side"><X size={15} /><span>COMMON MISTAKE</span><p>{trap.mistake}</p></div><ChevronRight size={19} /><div className="trap-side correction"><Check size={15} /><span>GET IT RIGHT</span><p>{trap.correction}</p></div></article>)}</div></section>
 
             <section id="practice-quiz" className="content-section quiz-section">
               <div className="content-heading"><span className="heading-icon quiz"><Target size={18} /></span><div><span>05 · TEST YOURSELF</span><h3>Practice Quiz</h3></div><small>{answeredCount === 5 ? `${score}/5 correct` : `${answeredCount}/5 answered`}</small></div>
               <div className="quiz-progress" role="progressbar" aria-valuemin={0} aria-valuemax={5} aria-valuenow={answeredCount}><span style={{ width: `${answeredCount * 20}%` }} /></div>
-              <div className="question-tabs">{result.pack.quiz.map((question, index) => <button key={index} onClick={() => setActiveQuestion(index)} aria-label={`Question ${index + 1}`} className={`${activeQuestion === index ? "active" : ""} ${answers[index] !== undefined ? (answers[index] === question.correctIndex ? "correct" : "wrong") : ""}`}>{answers[index] !== undefined ? answers[index] === question.correctIndex ? <Check size={14} /> : <X size={14} /> : index + 1}</button>)}</div>
-              {result.pack.quiz.map((question, questionIndex) => questionIndex === activeQuestion && <article className="question-card" key={questionIndex}>
+              <div className="question-tabs">{displayPack.quiz.map((question, index) => <button key={index} onClick={() => setActiveQuestion(index)} aria-label={`Question ${index + 1}`} className={`${activeQuestion === index ? "active" : ""} ${answers[index] !== undefined ? (answers[index] === question.correctIndex ? "correct" : "wrong") : ""}`}>{answers[index] !== undefined ? answers[index] === question.correctIndex ? <Check size={14} /> : <X size={14} /> : index + 1}</button>)}</div>
+              {displayPack.quiz.map((question, questionIndex) => questionIndex === activeQuestion && <article className="question-card" key={questionIndex}>
                 <div className="question-meta"><span>QUESTION {questionIndex + 1} OF 5</span><PageSource page={question.sourcePage} onOpen={setSourcePage} /></div>
                 <h4>{question.question}</h4>
                 <div className="options">{question.options.map((option, optionIndex) => { const answered = answers[questionIndex] !== undefined; const selected = answers[questionIndex] === optionIndex; const correct = question.correctIndex === optionIndex; return <button key={optionIndex} disabled={answered} onClick={() => setAnswers(previous => ({ ...previous, [questionIndex]: optionIndex }))} className={`${selected ? "selected" : ""} ${answered && correct ? "correct" : ""} ${answered && selected && !correct ? "wrong" : ""}`}><span>{String.fromCharCode(65 + optionIndex)}</span><p>{option}</p>{answered && correct && <CheckCircle2 size={18} />}{answered && selected && !correct && <X size={18} />}</button>; })}</div>
@@ -432,7 +550,7 @@ export default function ExamSprint() {
 
             <section className="print-quiz print-only" aria-hidden="true">
               <div className="print-section-title"><span>05</span><div><small>TEST YOURSELF</small><h3>Practice Quiz &amp; Answer Key</h3></div></div>
-              {result.pack.quiz.map((question, questionIndex) => <article className="print-question" key={questionIndex}>
+              {displayPack.quiz.map((question, questionIndex) => <article className="print-question" key={questionIndex}>
                 <div className="print-question-heading"><span>Question {questionIndex + 1} of 5</span><PageSource page={question.sourcePage} /></div>
                 <h4>{question.question}</h4>
                 <ol type="A">{question.options.map((option, optionIndex) => <li key={optionIndex} className={optionIndex === question.correctIndex ? "correct-option" : ""}>{option}</li>)}</ol>
@@ -441,7 +559,7 @@ export default function ExamSprint() {
             </section>
           </div>
 
-          <aside className="pack-sidebar"><div className="study-status"><div className="status-ring" style={{ background: `conic-gradient(#a98cff ${answeredCount * 72}deg, #292934 0deg)` }}><span>{answeredCount * 20}%</span></div><div><span>QUIZ PROGRESS</span><strong>{answeredCount === 5 ? `${score} correct` : `${5 - answeredCount} to go`}</strong></div></div><nav aria-label="Revision pack sections"><a href="#revision-pack"><Flame size={15} /> High-Yield Concepts</a><a href="#revision-pack"><Zap size={15} /> 60-Second Revision</a><a href="#revision-pack"><Brain size={15} /> Must Remember</a><a href="#revision-pack"><AlertTriangle size={15} /> Common Traps</a><a href="#revision-pack"><Target size={15} /> Practice Quiz</a></nav><div className="grounding-card"><ShieldCheck size={20} /><h4>Source grounded</h4><p>Every insight comes from the uploaded lecture. Page references help you verify the material.</p></div></aside>
+          <aside className="pack-sidebar"><div className="study-status"><div className="status-ring" style={{ background: `conic-gradient(#a98cff ${answeredCount * 72}deg, #292934 0deg)` }}><span>{answeredCount * 20}%</span></div><div><span>QUIZ PROGRESS</span><strong>{answeredCount === 5 ? `${score} correct` : `${5 - answeredCount} to go`}</strong></div></div><nav aria-label="Revision pack sections"><a href="#visual-summary"><GitFork size={15} /> Visual Summary</a><a href="#revision-pack"><Flame size={15} /> High-Yield Concepts</a><a href="#revision-pack"><Zap size={15} /> 60-Second Revision</a><a href="#revision-pack"><Brain size={15} /> Must Remember</a><a href="#revision-pack"><AlertTriangle size={15} /> Common Traps</a><a href="#practice-quiz"><Target size={15} /> Practice Quiz</a></nav><div className="grounding-card"><ShieldCheck size={20} /><h4>Source grounded</h4><p>Every insight comes from the uploaded lecture. Page references help you verify the material.</p></div></aside>
         </div>
       </section>}
     </main>
