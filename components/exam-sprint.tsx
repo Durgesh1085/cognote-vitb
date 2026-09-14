@@ -97,7 +97,21 @@ export default function ExamSprint() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const [helpOpen, setHelpOpen] = useState(false);
-  const [activeNav, setActiveNav] = useState("new-revision");
+  const [activeNav, setActiveNav] = useState("home");
+  const [cramRevealed, setCramRevealed] = useState(false);
+  const [quizResultsOpen, setQuizResultsOpen] = useState(false);
+
+  useEffect(() => { setCramRevealed(false); }, [cramIndex, cramOpen]);
+
+  useEffect(() => {
+    const syncView = () => {
+      const view = window.location.hash.slice(1) || "home";
+      if (["home", "new-revision", "revision-pack", "visual-summary", "practice-quiz"].includes(view)) setActiveNav(view);
+    };
+    syncView();
+    window.addEventListener("hashchange", syncView);
+    return () => window.removeEventListener("hashchange", syncView);
+  }, []);
 
   useEffect(() => {
     try {
@@ -153,6 +167,8 @@ export default function ExamSprint() {
   }
 
   function store(next: StoredPack) {
+    navigateSection("revision-pack");
+    setQuizResultsOpen(false);
     setResult(next); setAnswers({}); setActiveQuestion(0); setSourcePage(null); setCramOpen(false); setCramIndex(0);
     setCurrentSavedId(null); setCurrentPdfPath(null); setCloudPdfUrl(null); setSaveStatus("idle"); setCloudNotice(null);
     setLanguage("en"); setHindiPack(null); setTranslationStatus("idle"); setTranslationError("");
@@ -163,7 +179,7 @@ export default function ExamSprint() {
     setError(""); setCourse("Operating Systems"); setQuestionStyle("University Theory");
     setSourceFile(null);
     store({ pack: samplePack, course: "Operating Systems", fileName: "OS_Process_Management_Lecture.pdf", questionStyle: "University Theory", isSample: true, createdAt: new Date().toISOString() });
-    requestAnimationFrame(() => document.getElementById("revision-pack")?.scrollIntoView({ behavior: "smooth", block: "start" }));
+    requestAnimationFrame(() => window.scrollTo({ top: 0, behavior: "instant" }));
   }
 
   async function buildPack() {
@@ -181,7 +197,7 @@ export default function ExamSprint() {
       try { pack = parseStudyPack(isRecord(data) ? data.pack : null); } catch { throw new Error("The AI response was incomplete. Please try again; your previous pack is safe."); }
       store({ pack, course: course.trim(), fileName: file.name, questionStyle, isSample: false, createdAt: new Date().toISOString() });
       setSourceFile(file);
-      requestAnimationFrame(() => document.getElementById("revision-pack")?.scrollIntoView({ behavior: "smooth", block: "start" }));
+      requestAnimationFrame(() => window.scrollTo({ top: 0, behavior: "instant" }));
     } catch (problem) {
       if (abort.signal.aborted) setError(abort.signal.reason === "cancel" ? "Processing canceled. Your previous revision pack is safe." : "Processing took too long. Try a shorter PDF or use the sample lecture.");
       else setError(problem instanceof Error ? problem.message : "Something went wrong. Please try again.");
@@ -330,7 +346,7 @@ export default function ExamSprint() {
       setSourceFile(null);
       store({ pack, course: row.subject.slice(0, 120), fileName: row.pdf_path?.split("/").pop() || "Saved revision pack", questionStyle: row.question_style, isSample: false, createdAt: row.created_at });
       setCurrentSavedId(row.id); setCurrentPdfPath(row.pdf_path); setSaveStatus("saved"); setLibraryOpen(false);
-      requestAnimationFrame(() => document.getElementById("revision-pack")?.scrollIntoView({ behavior: "smooth", block: "start" }));
+      requestAnimationFrame(() => window.scrollTo({ top: 0, behavior: "instant" }));
     } catch { setLibraryError("This saved pack is incomplete and can’t be opened safely."); }
   }
 
@@ -381,10 +397,11 @@ export default function ExamSprint() {
     return () => { active = false; };
   }, [answeredCount, currentSavedId, score, supabase, user]);
 
-  function retryQuiz() { setAnswers({}); setActiveQuestion(0); }
+  function retryQuiz() { setAnswers({}); setActiveQuestion(0); setQuizResultsOpen(false); window.scrollTo({ top: 0, behavior: "instant" }); }
+  function showQuizResults() { setQuizResultsOpen(true); window.scrollTo({ top: 0, behavior: "instant" }); }
   function goToQuiz() {
     setCramOpen(false);
-    requestAnimationFrame(() => document.getElementById("practice-quiz")?.scrollIntoView({ behavior: "smooth", block: "start" }));
+    navigateSection("practice-quiz");
   }
 
   function exportPack() {
@@ -479,16 +496,17 @@ export default function ExamSprint() {
 
   function navigateSection(id: string) {
     setActiveNav(id); setMobileNavOpen(false); setHelpOpen(false);
-    document.getElementById(id)?.scrollIntoView({ behavior: "smooth", block: "start" });
+    window.history.pushState(null, "", `#${id}`);
+    window.scrollTo({ top: 0, behavior: "instant" });
   }
 
-  return <div className={`site-shell cognote-shell ${sidebarCollapsed ? "sidebar-collapsed" : ""}`}>
+  return <div data-view={busy ? "processing" : result || ["home", "new-revision"].includes(activeNav) ? activeNav : "home"} className={`site-shell cognote-shell ${sidebarCollapsed ? "sidebar-collapsed" : ""}`}>
     {mobileNavOpen && <button className="nav-scrim" aria-label="Close navigation" onClick={() => setMobileNavOpen(false)} />}
     <aside className={`cognote-sidebar ${mobileNavOpen ? "mobile-open" : ""}`} aria-label="Main navigation">
-      <a className="sidebar-brand" href="/" aria-label="Cognote home"><CognoteMark /><strong>Cognote<span>YOUR LEARNING SPACE</span></strong></a>
+      <a className="sidebar-brand" href="#home" onClick={event => { event.preventDefault(); navigateSection("home"); }} aria-label="Cognote home"><CognoteMark /><strong>Cognote<span>YOUR LEARNING SPACE</span></strong></a>
       <button className="sidebar-toggle" aria-label={sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"} onClick={() => setSidebarCollapsed(value => !value)}>{sidebarCollapsed ? <PanelLeftOpen size={17} /> : <PanelLeftClose size={17} />}</button>
       <button className="mobile-nav-close" aria-label="Close navigation" onClick={() => setMobileNavOpen(false)}><X size={20} /></button>
-      <nav><button title="New Revision" className={activeNav === "new-revision" ? "active" : ""} onClick={() => navigateSection("new-revision")}><Plus size={18} /><span>New Revision</span></button>
+      <nav><button title="Home" className={activeNav === "home" ? "active" : ""} onClick={() => navigateSection("home")}><Layers3 size={18} /><span>Home</span></button><button title="New Revision" className={activeNav === "new-revision" ? "active" : ""} onClick={() => navigateSection("new-revision")}><Plus size={18} /><span>New Revision</span></button>
       <button title="My Library" onClick={() => { setMobileNavOpen(false); user ? void loadLibrary() : openAuth("library"); }}><Library size={18} /><span>My Library</span></button>
       <small>THIS LECTURE</small>
       <button title="Revision Pack" disabled={!result || busy} className={activeNav === "revision-pack" ? "active" : ""} onClick={() => navigateSection("revision-pack")}><BookOpen size={18} /><span>Revision Pack</span></button>
@@ -498,17 +516,20 @@ export default function ExamSprint() {
       <div className="sidebar-bottom"><div className="sidebar-note"><ShieldCheck size={19} /><strong>Your lecture. Your source.</strong><p>Every insight starts with the material you upload.</p></div><button title="Help & Guide" onClick={() => { setMobileNavOpen(false); setHelpOpen(true); }}><HelpCircle size={18} /><span>Help & Guide</span></button><button title={user ? "Sign out" : "Sign in"} onClick={() => { setMobileNavOpen(false); user ? void signOut() : openAuth(null); }}>{user ? <LogOut size={18} /> : <UserRound size={18} />}<span>{user ? user.email : "Sign in to save your work"}</span></button></div>
     </aside>
     <header className="app-header">
-      <button className="mobile-menu" aria-label="Open navigation" aria-expanded={mobileNavOpen} onClick={() => setMobileNavOpen(true)}><Menu size={22} /></button><div className="header-context"><span>WORKSPACE</span><strong>Upload. Understand. Revise.</strong></div>
+      <button className="mobile-menu" aria-label="Open navigation" aria-expanded={mobileNavOpen} onClick={() => setMobileNavOpen(true)}><Menu size={22} /></button><div className="header-context"><span>WORKSPACE</span><strong>{activeNav === "practice-quiz" && result ? "Practice studio" : activeNav === "visual-summary" && result ? "Your knowledge, connected" : activeNav === "revision-pack" && result ? "Your revision workspace" : "Make room for your next big idea."}</strong></div>
       <div className="header-status"><span className="online-dot" /> Grounded in your lecture</div>
       <div className="header-actions"><button className="sample-button" onClick={loadSample} disabled={busy}><Zap size={15} /> Try Sample Lecture</button>{user ? <><button className="library-button" onClick={() => void loadLibrary()}><Library size={15} /> My Library</button><span className="account-email"><UserRound size={14} /> {user.email}</span><button className="account-icon-button" onClick={() => void signOut()} aria-label="Sign out" title="Sign out"><LogOut size={16} /></button></> : <button className="library-button" onClick={() => openAuth(null)} disabled={!authReady}><LogIn size={15} /> Sign in</button>}</div>
     </header>
 
     <main className="workspace">
-      <section className="intro" id="new-revision">
-        <div className="intro-copy"><div className="eyebrow"><Sparkles size={13} /> LESS BUSYWORK. MORE UNDERSTANDING.</div><h1>Turn lectures into<br /><span>understanding.</span></h1><p>Your lecture, distilled into the concepts that matter.<br />Grounded notes. Clear connections. Exam-ready recall.</p><div className="journey-strip"><span><FileText size={16} /> Lecture PDF</span><ChevronRight size={15} /><span><Sparkles size={16} /> AI understanding</span><ChevronRight size={15} /><span><Target size={16} /> Exam-ready revision</span></div></div>
-        <div className="trust-strip"><div><ShieldCheck size={17} /><span><strong>Grounded in your PDF</strong><small>No outside material</small></span></div><div><Target size={17} /><span><strong>Exam-focused</strong><small>High-yield only</small></span></div><div><Brain size={17} /><span><strong>Active recall</strong><small>Exactly 5 questions</small></span></div></div>
+      <section className="intro" id="home">
+        <div className="intro-copy"><div className="eyebrow"><Sparkles size={13} /> LESS BUSYWORK. MORE UNDERSTANDING.</div><h1>Big lectures.<br /><span>Brighter ideas.</span></h1><p>Less rereading. More “I get it.”<br />Turn your lecture into notes, connections, and confident recall.</p><div className="hero-actions"><button onClick={() => navigateSection("new-revision")}><Plus size={18} /> Create a revision <ChevronRight size={17} /></button><button onClick={loadSample} disabled={busy}><Play size={15} /> Explore a sample</button></div><div className="journey-strip"><span><FileText size={16} /> Lecture PDF</span><ChevronRight size={15} /><span><Sparkles size={16} /> AI understanding</span><ChevronRight size={15} /><span><Target size={16} /> Exam-ready revision</span></div></div>
+        <div className="home-art"><img src="/images/cognote-learning.webp" alt="Sculptural notebook surrounded by floating connected ideas" width="640" height="640" /><span className="art-note note-one"><Sparkles size={16} /> A little clarity goes a long way.</span><span className="art-note note-two"><CheckCircle2 size={15} /> Made from your lecture</span></div>
       </section>
 
+      <section className="home-discover"><div className="discover-heading"><span>YOUR MIND, WITH MORE ROOM.</span><h2>A better way to meet your next exam.</h2></div><div className="discover-grid"><button onClick={() => result ? navigateSection("revision-pack") : loadSample()}><span className="discover-icon"><BookOpen size={24} /></span><small>01 / UNDERSTAND</small><h3>Find the signal.</h3><p>Turn pages of lecture material into the ideas worth remembering.</p><span className="discover-link">Explore revision notes <ChevronRight size={15} /></span></button><button onClick={() => { if (result) { setCramIndex(0); setCramOpen(true); } else { loadSample(); setCramOpen(true); } }}><span className="discover-icon"><Brain size={24} /></span><small>02 / REMEMBER</small><h3>Get into your zone.</h3><p>One idea at a time. A focused recall session before the big day.</p><span className="discover-link">Enter Cram Mode <ChevronRight size={15} /></span></button><button onClick={() => { if (!result) loadSample(); navigateSection("practice-quiz"); }}><span className="discover-icon"><Target size={24} /></span><small>03 / TEST YOURSELF</small><h3>Make it stick.</h3><p>Five grounded questions, clear explanations, and a little more confidence.</p><span className="discover-link">Try the practice studio <ChevronRight size={15} /></span></button></div>{result && <button className="resume-pack" onClick={() => navigateSection("revision-pack")}><span><RotateCcw size={20} /></span><div><small>PICK UP WHERE YOU LEFT OFF</small><strong>{result.pack.title}</strong></div><ChevronRight size={22} /></button>}</section>
+      <div className="creation-heading"><span>NEW REVISION</span><h1>Good studying starts here.</h1><p>Bring your lecture. We’ll help you see it clearly.</p><div className="creation-flow"><span><FileText size={19} /> Your PDF</span><ChevronRight size={18} /><span><Sparkles size={19} /> Cognote AI</span><ChevronRight size={18} /><span><BookOpen size={19} /> Revision pack</span></div></div>
+      <div className="home-section-label"><span>01 / YOUR NEXT LEARNING SESSION</span><small>One PDF. A whole new perspective.</small></div>
       <section className="builder-card" aria-labelledby="upload-heading">
         <div className="builder-heading"><div><span className="section-number">01</span><div><h2 id="upload-heading">Build your revision pack</h2><p>One lecture in. Everything you need to revise, out.</p></div></div><span className="pdf-only">PDF · MAX 4 MB</span></div>
         <div className="builder-grid">
@@ -527,15 +548,15 @@ export default function ExamSprint() {
 
       {busy && <section className="processing-card" aria-live="polite">
         <div className="scan-visual"><div className="page-stack one" /><div className="page-stack two" /><div className="scan-page"><FileText size={36} /><span /></div></div>
-        <div className="processing-copy"><span className="section-number">GEMINI IS STUDYING</span><h2>Turning pages into progress.</h2><p>We’re reading your lecture and keeping every insight grounded in the source.</p><div className="process-list">{processingSteps.map((step, index) => <div className={index <= completedSteps ? "active" : ""} key={step}>{index < completedSteps ? <CheckCircle2 size={19} /> : index === completedSteps ? <LoaderCircle className="spin" size={19} /> : <Circle size={19} />}<span>{step}</span></div>)}</div><div className="processing-progress"><span style={{ width: `${Math.min(94, 12 + elapsed * 2.4)}%` }} /></div><small>{elapsed}s elapsed · usually ready in under a minute</small><button className="cancel-button" onClick={() => controller.current?.abort("cancel")}>Cancel</button></div>
+        <div className="processing-copy"><span className="section-number">GEMINI IS STUDYING</span><h2>Turning pages into progress.</h2><p>We’re reading your lecture and keeping every insight grounded in the source.</p><div className="process-list">{processingSteps.map((step, index) => <div className={index <= completedSteps ? "active" : ""} key={step}>{index < completedSteps ? <CheckCircle2 size={19} /> : index === completedSteps ? <LoaderCircle className="spin" size={19} /> : <Circle size={19} />}<span>{step}</span></div>)}</div><div className="processing-progress"><span /></div><small>{elapsed}s elapsed · usually ready in under a minute</small><button className="cancel-button" onClick={() => controller.current?.abort("cancel")}>Cancel</button></div>
       </section>}
 
       {result && displayPack && !busy && <section id="revision-pack" className="revision-pack">
         <div className="pack-header">
           <div className="print-brand print-only"><CognoteMark /><strong>Cognote</strong><em>Revision Pack</em></div>
-          <div className="pack-header-actions"><button className="back-button" onClick={() => document.querySelector(".builder-card")?.scrollIntoView({ behavior: "smooth" })}><ArrowLeft size={15} /> New lecture</button><div className="pack-action-group"><button className={`save-library-button ${saveStatus === "saved" || currentSavedId ? "saved" : ""}`} onClick={() => user ? void saveCurrentToLibrary() : openAuth("save")} disabled={saveStatus === "saving" || Boolean(currentSavedId)}>{saveStatus === "saving" ? <LoaderCircle className="spin" size={16} /> : saveStatus === "saved" || currentSavedId ? <Check size={16} /> : <Save size={16} />}{saveStatus === "saving" ? "Saving..." : saveStatus === "saved" || currentSavedId ? "Saved to My Library" : "Save to My Library"}</button><button className="cram-button" onClick={() => { setCramIndex(0); setCramOpen(true); }}><Brain size={16} /> Start Cram Mode</button><button className="export-button" onClick={exportPack}><Printer size={16} /> Export Revision Pack</button></div></div>
+          <div className="pack-header-actions"><button className="back-button" onClick={() => navigateSection("new-revision")}><ArrowLeft size={15} /> New lecture</button><div className="pack-action-group"><button className={`save-library-button ${saveStatus === "saved" || currentSavedId ? "saved" : ""}`} onClick={() => user ? void saveCurrentToLibrary() : openAuth("save")} disabled={saveStatus === "saving" || Boolean(currentSavedId)}>{saveStatus === "saving" ? <LoaderCircle className="spin" size={16} /> : saveStatus === "saved" || currentSavedId ? <Check size={16} /> : <Save size={16} />}{saveStatus === "saving" ? "Saving..." : saveStatus === "saved" || currentSavedId ? "Saved to My Library" : "Save to My Library"}</button><button className="cram-button" onClick={() => { setCramIndex(0); setCramOpen(true); }}><Brain size={16} /> Start Cram Mode</button><button className="export-button" onClick={exportPack}><Printer size={16} /> Export Revision Pack</button></div></div>
           <div className="learning-tools" aria-label="Revision tools">
-            <button type="button" className="tool-button" onClick={() => document.getElementById("visual-summary")?.scrollIntoView({ behavior: "smooth", block: "start" })}><GitFork size={16} /> Visual Summary</button>
+            <button type="button" className="tool-button" onClick={() => navigateSection("visual-summary")}><GitFork size={16} /> Visual Summary</button>
             <div className="speech-tools">
               {speechStatus === "idle" ? <button type="button" className="tool-button" onClick={readAloud} disabled={!speechSupported} title={speechSupported ? "Read revision notes aloud" : "Your browser does not support Read Aloud"}><Volume2 size={16} /> Read Aloud</button> : speechStatus === "playing" ? <button type="button" className="tool-button active" onClick={pauseSpeech}><Pause size={16} /> Pause</button> : <button type="button" className="tool-button active" onClick={resumeSpeech}><Play size={16} /> Resume</button>}
               {speechStatus !== "idle" && <button type="button" className="tool-icon-button" onClick={stopSpeech} aria-label="Stop Read Aloud" title="Stop"><Square size={14} /></button>}
@@ -547,6 +568,7 @@ export default function ExamSprint() {
         </div>
         {cloudNotice && <div className={`cloud-notice ${cloudNotice.tone}`} role="status">{cloudNotice.tone === "success" ? <CheckCircle2 size={16} /> : <AlertTriangle size={16} />}<span>{cloudNotice.text}</span><button onClick={() => setCloudNotice(null)} aria-label="Dismiss"><X size={14} /></button></div>}
 
+        <nav className="workspace-tabs" aria-label="Study views"><button className={activeNav === "revision-pack" ? "active" : ""} onClick={() => navigateSection("revision-pack")}><BookOpen size={16} /> Revision notes</button><button className={activeNav === "visual-summary" ? "active" : ""} onClick={() => navigateSection("visual-summary")}><GitFork size={16} /> Concept map</button><button className={activeNav === "practice-quiz" ? "active" : ""} onClick={() => navigateSection("practice-quiz")}><Target size={16} /> Practice quiz <span>5</span></button></nav>
         <div className="pack-layout">
           <div className="pack-main">
             <section id="visual-summary" className="content-section visual-summary"><div className="content-heading"><span className="heading-icon map"><GitFork size={18} /></span><div><span>LECTURE AT A GLANCE</span><h3>Visual Summary</h3></div><small>Built from this revision pack</small></div><div className="map-scroll"><div className="concept-map"><div className="map-root"><span>LECTURE</span><strong>{compactText(displayPack.title, 70)}</strong></div><div className="map-branches">
@@ -563,7 +585,8 @@ export default function ExamSprint() {
 
             <section className="content-section traps"><div className="content-heading"><span className="heading-icon warning"><AlertTriangle size={18} /></span><div><span>04 · DON’T LOSE MARKS</span><h3>Common Traps</h3></div></div><div className="trap-list">{displayPack.commonTraps.map((trap, index) => <article key={index}><div className="trap-side"><X size={15} /><span>COMMON MISTAKE</span><p>{trap.mistake}</p></div><ChevronRight size={19} /><div className="trap-side correction"><Check size={15} /><span>GET IT RIGHT</span><p>{trap.correction}</p></div></article>)}</div></section>
 
-            <section id="practice-quiz" className="content-section quiz-section">
+            <section id="practice-quiz" className={`content-section quiz-section ${quizResultsOpen ? "show-results" : ""}`}>
+              <div className="quiz-intro"><span className="quiz-orbit"><Target size={32} /></span><div><span>THE PRACTICE STUDIO</span><h2>Let’s see what stuck.</h2><p>Five questions. No pressure. Every answer is a chance to understand more.</p></div></div>
               <div className="content-heading"><span className="heading-icon quiz"><Target size={18} /></span><div><span>05 · TEST YOURSELF</span><h3>Practice Quiz</h3></div><small>{answeredCount === 5 ? `${score}/5 correct` : `${answeredCount}/5 answered`}</small></div>
               <div className="quiz-progress" role="progressbar" aria-valuemin={0} aria-valuemax={5} aria-valuenow={answeredCount}><span style={{ width: `${answeredCount * 20}%` }} /></div>
               <div className="question-tabs">{displayPack.quiz.map((question, index) => <button key={index} onClick={() => setActiveQuestion(index)} aria-label={`Question ${index + 1}`} className={`${activeQuestion === index ? "active" : ""} ${answers[index] !== undefined ? (answers[index] === question.correctIndex ? "correct" : "wrong") : ""}`}>{answers[index] !== undefined ? answers[index] === question.correctIndex ? <Check size={14} /> : <X size={14} /> : index + 1}</button>)}</div>
@@ -572,9 +595,9 @@ export default function ExamSprint() {
                 <h4>{question.question}</h4>
                 <div className="options">{question.options.map((option, optionIndex) => { const answered = answers[questionIndex] !== undefined; const selected = answers[questionIndex] === optionIndex; const correct = question.correctIndex === optionIndex; return <button key={optionIndex} disabled={answered} onClick={() => setAnswers(previous => ({ ...previous, [questionIndex]: optionIndex }))} className={`${selected ? "selected" : ""} ${answered && correct ? "correct" : ""} ${answered && selected && !correct ? "wrong" : ""}`}><span>{String.fromCharCode(65 + optionIndex)}</span><p>{option}</p>{answered && correct && <CheckCircle2 size={18} />}{answered && selected && !correct && <X size={18} />}</button>; })}</div>
                 {answers[questionIndex] !== undefined && <div className={`answer-panel ${answers[questionIndex] === question.correctIndex ? "correct" : "wrong"}`}><div className="answer-status">{answers[questionIndex] === question.correctIndex ? <CheckCircle2 size={21} /> : <X size={21} />}<strong>{answers[questionIndex] === question.correctIndex ? "Correct" : "Incorrect"}</strong></div><p><span>Correct answer</span>{String.fromCharCode(65 + question.correctIndex)}. {question.options[question.correctIndex]}</p><p><span>Why</span>{question.explanation}</p><PageSource page={question.sourcePage} onOpen={setSourcePage} /></div>}
-                <div className="quiz-nav"><button disabled={questionIndex === 0} onClick={() => setActiveQuestion(questionIndex - 1)}><ArrowLeft size={14} /> Previous</button>{questionIndex < 4 ? <button onClick={() => setActiveQuestion(questionIndex + 1)}>Next question <ChevronRight size={14} /></button> : null}</div>
+                <div className="quiz-nav"><button disabled={questionIndex === 0} onClick={() => setActiveQuestion(questionIndex - 1)}><ArrowLeft size={14} /> Previous</button>{questionIndex < 4 ? <button onClick={() => setActiveQuestion(questionIndex + 1)}>Next question <ChevronRight size={14} /></button> : answeredCount === 5 ? <button className="finish-quiz" onClick={showQuizResults}>See my results <ChevronRight size={15} /></button> : null}</div>
               </article>)}
-              {answeredCount === 5 && <div className="quiz-complete" aria-live="polite"><span className="quiz-complete-icon"><CheckCircle2 size={25} /></span><div className="quiz-complete-copy"><span>REVISION CHECK COMPLETE</span><h4>{score} <small>/ 5</small></h4><strong>{score * 20}%</strong><p>{scoreMessage}</p></div><button type="button" onClick={retryQuiz}><RotateCcw size={15} /> Retry Quiz</button></div>}
+              {answeredCount === 5 && <div className="quiz-complete" aria-live="polite"><span className="quiz-complete-icon"><CheckCircle2 size={38} /></span><div className="quiz-complete-copy"><span>REVISION CHECK COMPLETE</span><h4>{score} <small>/ 5</small></h4><strong>{score * 20}%</strong><p>{scoreMessage}</p></div><div className="quiz-result-actions"><button onClick={() => { setQuizResultsOpen(false); const firstMistake = result.pack.quiz.findIndex((question, index) => answers[index] !== question.correctIndex); setActiveQuestion(firstMistake < 0 ? 0 : firstMistake); window.scrollTo({ top: 0, behavior: "instant" }); }}><BookOpen size={16} /> {score === 5 ? "Review answers" : "Review mistakes"}</button><button type="button" onClick={retryQuiz}><RotateCcw size={16} /> Retry Quiz</button><button onClick={() => navigateSection("revision-pack")}><ArrowLeft size={16} /> Return to revision</button></div></div>}
             </section>
 
             <section className="print-quiz print-only" aria-hidden="true">
@@ -605,7 +628,7 @@ export default function ExamSprint() {
 
     {authOpen && <div className="auth-overlay" onMouseDown={event => { if (event.target === event.currentTarget) setAuthOpen(false); }}>
       <section className="auth-modal" role="dialog" aria-modal="true" aria-labelledby="auth-title">
-        <header><div><span><Cloud size={19} /></span><div><strong id="auth-title">{authMode === "sign-in" ? "Welcome to Cognote" : "Your learning, everywhere"}</strong><small>Save your revision packs across devices.</small></div></div><button type="button" onClick={() => setAuthOpen(false)} aria-label="Close account dialog"><X size={20} /></button></header>
+        <header><div><span><Cloud size={19} /></span><div><strong id="auth-title">{authMode === "sign-in" ? "Welcome to Cognote" : "Your learning, everywhere"}</strong><small>Keep your revision packs with you, everywhere.</small></div></div><button type="button" onClick={() => setAuthOpen(false)} aria-label="Close account dialog"><X size={20} /></button></header>
         <div className="auth-tabs"><button type="button" className={authMode === "sign-in" ? "active" : ""} onClick={() => { setAuthMode("sign-in"); setAuthError(""); setAuthMessage(""); }}>Sign In</button><button type="button" className={authMode === "sign-up" ? "active" : ""} onClick={() => { setAuthMode("sign-up"); setAuthError(""); setAuthMessage(""); }}>Sign Up</button></div>
         <form onSubmit={event => { event.preventDefault(); void submitAuth(); }}><label><span>Email</span><div><Mail size={16} /><input type="email" value={authEmail} onChange={event => setAuthEmail(event.target.value)} placeholder="you@example.com" autoComplete="email" required /></div></label><label><span>Password</span><div><LockKeyhole size={16} /><input type="password" value={authPassword} onChange={event => setAuthPassword(event.target.value)} placeholder="At least 6 characters" autoComplete={authMode === "sign-in" ? "current-password" : "new-password"} minLength={6} required /></div></label>{authError && <p className="auth-feedback error"><AlertTriangle size={15} /> {authError}</p>}{authMessage && <p className="auth-feedback success"><CheckCircle2 size={15} /> {authMessage}</p>}<button className="auth-submit" type="submit" disabled={authBusy}>{authBusy ? <LoaderCircle className="spin" size={17} /> : authMode === "sign-in" ? <LogIn size={17} /> : <UserRound size={17} />}{authBusy ? "Please wait..." : authMode === "sign-in" ? "Sign In" : "Create Account"}</button></form>
         <p className="auth-guest-note">Guest mode stays available. Signing in only enables private cloud storage and cross-device history.</p>
@@ -615,17 +638,17 @@ export default function ExamSprint() {
     {libraryOpen && <div className="library-overlay" onMouseDown={event => { if (event.target === event.currentTarget) setLibraryOpen(false); }}>
       <section className="library-panel" role="dialog" aria-modal="true" aria-labelledby="library-title">
         <header><div><span><Library size={20} /></span><div><strong id="library-title">My Library</strong><small>{user?.email} · newest first</small></div></div><button type="button" onClick={() => setLibraryOpen(false)} aria-label="Close library"><X size={20} /></button></header>
-        <div className="library-content">{libraryError && <div className="library-error"><AlertTriangle size={16} /> {libraryError}<button onClick={() => void loadLibrary()}>Retry</button></div>}{libraryBusy ? <div className="library-empty"><LoaderCircle className="spin" size={29} /><h3>Loading your revision packs…</h3></div> : libraryRows.length === 0 ? <div className="library-empty"><span><Library size={30} /></span><h3>Your library is ready</h3><p>Save a generated revision pack and it will appear here across your devices.</p></div> : <div className="library-grid">{libraryRows.map(row => <article key={row.id}><div className="library-card-top"><span><FileText size={17} /></span><small>{new Date(row.created_at).toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" })}</small></div><h3>{row.title}</h3><p>{row.subject} <span>·</span> {row.question_style}</p><div className="library-card-meta"><span>{row.quiz_score === null ? "Quiz not completed" : `${row.quiz_score}/5 quiz score`}</span><span>{row.pdf_path ? "PDF stored privately" : "Notes only"}</span></div><div className="library-card-actions"><button type="button" onClick={() => openSavedPack(row)}><FolderOpen size={15} /> Open</button><button type="button" className="delete" onClick={() => void deleteSavedPack(row)} disabled={deletingId === row.id}>{deletingId === row.id ? <LoaderCircle className="spin" size={15} /> : <Trash2 size={15} />} Delete</button></div></article>)}</div>}</div>
+        <div className="library-screen-heading"><div><span>YOUR PERSONAL KNOWLEDGE SHELF</span><h2>Keep your best ideas close.</h2><p>Everything you’ve studied. Ready whenever you are.</p></div><button onClick={() => { setLibraryOpen(false); navigateSection("new-revision"); }}><Plus size={17} /> New Revision</button></div><div className="library-content">{libraryError && <div className="library-error"><AlertTriangle size={16} /> {libraryError}<button onClick={() => void loadLibrary()}>Retry</button></div>}{libraryBusy ? <div className="library-empty"><LoaderCircle className="spin" size={29} /><h3>Loading your revision packs…</h3></div> : libraryRows.length === 0 ? <div className="library-empty"><span><Library size={30} /></span><h3>Your library is ready</h3><p>Save a generated revision pack and it will appear here across your devices.</p></div> : <div className="library-grid">{libraryRows.map(row => <article key={row.id}><div className="library-card-top"><span><FileText size={17} /></span><small>{new Date(row.created_at).toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" })}</small></div><h3>{row.title}</h3><p>{row.subject} <span>·</span> {row.question_style}</p><div className="library-card-meta"><span>{row.quiz_score === null ? "Quiz not completed" : `${row.quiz_score}/5 quiz score`}</span><span>{row.pdf_path ? "PDF stored privately" : "Notes only"}</span></div><div className="library-card-actions"><button type="button" onClick={() => openSavedPack(row)}><FolderOpen size={15} /> Open</button><button type="button" className="delete" onClick={() => void deleteSavedPack(row)} disabled={deletingId === row.id}>{deletingId === row.id ? <LoaderCircle className="spin" size={15} /> : <Trash2 size={15} />} Delete</button></div></article>)}</div>}</div>
       </section>
     </div>}
 
     {cramOpen && result && <div className="cram-overlay" onMouseDown={event => { if (event.target === event.currentTarget) setCramOpen(false); }}>
-      <section className="cram-shell" role="dialog" aria-modal="true" aria-labelledby="cram-title">
-        <header className="cram-header"><div><span><Brain size={17} /></span><div><strong id="cram-title">Cram Mode</strong><small>{result.course}</small></div></div><button type="button" onClick={() => setCramOpen(false)} aria-label="Close Cram Mode"><X size={20} /></button></header>
+      <section className="cram-shell" role="dialog" aria-modal="true" aria-labelledby="cram-title" onKeyDown={event => { if (event.code === "Space" && event.target === event.currentTarget) { event.preventDefault(); setCramRevealed(value => !value); } }} tabIndex={-1}>
+        <header className="cram-header"><div><span><Brain size={17} /></span><div><strong id="cram-title">Cram Mode</strong><small>{result.course} · Active recall</small></div></div><button type="button" onClick={() => setCramOpen(false)} aria-label="Close Cram Mode" title="Exit Cram Mode"><X size={20} /></button></header>
         <div className="cram-progress"><span style={{ width: `${((Math.min(cramIndex, cramCards.length) + 1) / (cramCards.length + 1)) * 100}%` }} /></div>
         {cramIndex < cramCards.length ? <div className="cram-stage">
-          <div className="cram-count">{cramIndex + 1} / {cramCards.length}</div>
-          <article className="cram-card"><span>{cramCards[cramIndex].label}</span><h2>{cramCards[cramIndex].title}</h2>{cramCards[cramIndex].secondary && <small>{cramCards[cramIndex].secondary}</small>}<p>{cramCards[cramIndex].body}</p><PageSource page={cramCards[cramIndex].sourcePage} onOpen={setSourcePage} /></article>
+          <div className="cram-count"><span>FOCUS SESSION</span><strong>{String(cramIndex + 1).padStart(2, "0")} <em>/ {String(cramCards.length).padStart(2, "0")}</em></strong></div>
+          <article className={`cram-card ${cramRevealed ? "is-revealed" : ""}`} key={cramIndex}><span>{cramCards[cramIndex].label}</span><div className="cram-card-symbol"><Sparkles size={30} /></div><h2>{cramCards[cramIndex].title}</h2><div className="cram-recall-hint">Take a breath. What do you remember?</div>{cramRevealed ? <div className="cram-revealed" aria-live="polite">{cramCards[cramIndex].secondary && <small>{cramCards[cramIndex].secondary}</small>}<p>{cramCards[cramIndex].body}</p><PageSource page={cramCards[cramIndex].sourcePage} onOpen={setSourcePage} /></div> : <button className="reveal-card" onClick={() => setCramRevealed(true)}><BookOpen size={17} /> Reveal explanation <ChevronRight size={16} /></button>}</article><div className="cram-dots">{cramCards.map((_, index) => <button key={index} aria-label={`Go to revision card ${index + 1}`} aria-current={index === cramIndex ? "step" : undefined} className={index === cramIndex ? "active" : index < cramIndex ? "done" : ""} onClick={() => setCramIndex(index)} />)}</div>
         </div> : <div className="cram-stage cram-finish"><span className="cram-finish-icon"><Target size={30} /></span><small>REVISION PASS COMPLETE</small><h2>Ready to test your recall?</h2><p>You’ve reviewed the condensed notes. Finish with the five-question practice quiz.</p><button type="button" onClick={goToQuiz}><Target size={17} /> Go to Practice Quiz</button></div>}
         <footer className="cram-nav"><button type="button" onClick={() => setCramIndex(index => Math.max(0, index - 1))} disabled={cramIndex === 0}><ArrowLeft size={16} /> Previous</button><span>Use ← → keys to move · Esc to close</span>{cramIndex < cramCards.length ? <button type="button" onClick={() => setCramIndex(index => Math.min(cramCards.length, index + 1))}>Next <ChevronRight size={16} /></button> : <button type="button" onClick={goToQuiz}>Quiz <ChevronRight size={16} /></button>}</footer>
       </section>
