@@ -1,5 +1,5 @@
 /* Paper & Purple: presentation-only theme. Print retains its dedicated stylesheet. */
-:root {
+:root:not([data-theme="dark"]) {
   color-scheme: light;
   --bg: #f7f6fa;
   --surface: #fff;
@@ -10,18 +10,22 @@
   --soft: #f1eafa;
   --shadow: 0 4px 20px #44207806, 0 1px 3px #44207804;
 }
-.cognote-mark { display:grid;place-items:center;flex-shrink:0;width:39px;height:39px;background:#6333c6;color:#fff;border:0;border-radius:12px;box-shadow:0 4px 10px #6333c61a; }
+.cognote-mark { display:grid;place-items:center;flex-shrink:0;width:42px;height:42px;background:linear-gradient(145deg,#8954df,#5424a1);color:#fff;border:1px solid #ffffff30;border-radius:13px;box-shadow:inset 0 1px 0 #ffffff35,0 5px 12px #6333c622; }
 .cognote-mark::before,.cognote-mark::after { content:none; }
 .cognote-mark svg { width:100%;height:100%; }
 @media screen {
+ :root:not([data-theme="dark"]) {
   body,.cognote-shell { background:var(--bg);color:var(--text); }
   ::selection { background:#dfd0fa;color:#34176a; }
   .workspace { max-width:1160px;width:calc(100% - 64px); }
   .cognote-shell { padding-left:236px; }
   .cognote-sidebar { width:236px;background:#fff;border-right:1px solid var(--line);padding:28px 15px 18px;box-shadow:4px 0 24px #3c176903; }
-  .sidebar-brand { gap:10px; }
-  .sidebar-brand strong { color:#35234c;font-size:25px;font-weight:730;letter-spacing:-1.1px; }
-  .sidebar-brand strong span { color:#796a8a;font-size:8px;letter-spacing:1.2px; }
+  .sidebar-brand { gap:11px;align-items:center; }
+  .sidebar-brand strong { color:#35234c;font-size:27px;font-weight:750;letter-spacing:-1.35px;line-height:1.05; }
+  .sidebar-brand .brand-cog { color:#372047;font-weight:750; }
+  .sidebar-brand .brand-note { font-style:normal;font-weight:650;color:#7540be;letter-spacing:-1.5px; }
+  .sidebar-brand strong span { display:block;color:#877398;font-size:7px;font-weight:500;letter-spacing:1.55px;line-height:1.4;margin-top:8px; }
+  .sidebar-brand:hover .cognote-mark { box-shadow:inset 0 1px 0 #ffffff35,0 7px 16px #6333c62e; }
   .sidebar-toggle { color:#837492; }
   .cognote-sidebar nav button,.sidebar-bottom>button { min-height:46px;border-radius:10px;color:#6e617c;font-size:12px;font-weight:550;gap:12px; }
   .cognote-sidebar nav button svg,.sidebar-bottom>button svg { width:18px;height:18px; }
@@ -416,4 +420,43 @@
     .help-coach { padding:20px; }
   }
   @media (prefers-reduced-motion:reduce) { *,*::before,*::after { animation:none!important;transition:none!important;scroll-behavior:auto!important; } }
+ }
+}
+
+/* Shared mechanics: sidebar contents must remain reachable on short screens. */
+@media screen {
+  .cognote-sidebar {
+    height:100dvh;
+    overflow-y:auto;
+    overflow-x:hidden;
+    overscroll-behavior-y:contain;
+    scrollbar-width:thin;
+    scrollbar-color:#b59bd2 transparent;
+    padding-bottom:max(20px,env(safe-area-inset-bottom));
+  }
+  .cognote-sidebar>* { flex-shrink:0; }
+  .theme-toggle {
+    order:2; flex-shrink:0; width:38px; height:38px;
+    display:grid; place-items:center;
+    border:1px solid #ddd0ed; border-radius:10px;
+    background:#f5effd; color:#6934a6;
+  }
+  .theme-toggle:hover { background:#e9dcfa; }
+  :root[data-theme="dark"] { color-scheme:dark; }
+  :root[data-theme="dark"] .theme-toggle { background:#30213c;border-color:#5b416c;color:#dfc5f5; }
+  :root[data-theme="dark"] .theme-toggle:hover { background:#432d53; }
+  :root[data-theme="dark"] .sidebar-brand .brand-cog { color:#f2e9fa;font-weight:750; }
+  :root[data-theme="dark"] .sidebar-brand .brand-note { color:#c7a3ef;font-style:normal;font-weight:650; }
+  :root:not([data-theme="dark"]) :is(.intro h1,.creation-heading h1,.pack-title h2,.content-heading h3,.concept-grid h4,.question-card>h4,.discover-heading h2,.discover-grid h3,.library-grid h3,.cram-card h2) { color:#27212f; }
+  :root:not([data-theme="dark"]) .intro h1 span { color:#733ccc; }
+  :root:not([data-theme="dark"]) :is(.concept-grid p,.remember-list p,.discover-grid p,.intro-copy>p,.options button,.cram-revealed>p) { color:#514858; }
+  :root:not([data-theme="dark"]) .options button.correct { color:#306444; }
+  :root:not([data-theme="dark"]) .options button.wrong { color:#8a3e59; }
+  :root:not([data-theme="dark"]) :is(.summary-callout p,.quiz-intro h2) { color:#512575; }
+  @media(max-width:760px) {
+    .app-header { gap:8px; }
+    .header-context { min-width:0;flex:1; }
+    .header-context strong { display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap; }
+    .theme-toggle { width:36px;height:36px; }
+  }
 }

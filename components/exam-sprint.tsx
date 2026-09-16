@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState, type DragEvent } from "react";
+import { Moon, Sun } from "lucide-react";
 import type { User } from "@supabase/supabase-js";
 import { AlertTriangle, ArrowLeft, BookOpen, Brain, Check, CheckCircle2, ChevronRight, Circle, Cloud, FileText, Flame, FolderOpen, GitFork, HelpCircle, Languages, Layers3, Library, LoaderCircle, LockKeyhole, LogIn, LogOut, Mail, Menu, PanelLeftClose, PanelLeftOpen, Pause, Play, Plus, Printer, RotateCcw, Save, ShieldCheck, Sparkles, Square, Target, Trash2, UploadCloud, UserRound, Volume2, X, Zap } from "lucide-react";
 import { samplePack } from "@/lib/sample-pack";
@@ -35,7 +36,7 @@ function compactText(value: string, max = 105) {
 }
 
 function CognoteMark() {
-  return <span className="cognote-mark" aria-hidden="true"><svg viewBox="0 0 40 40" fill="none"><path d="M28 10H18a10 10 0 0 0 0 20h10" stroke="currentColor" strokeWidth="3.2" strokeLinecap="round" /><path d="M18 17h9M18 23h6" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" /><circle cx="30" cy="10" r="3" fill="currentColor" /><circle cx="30" cy="30" r="3" fill="currentColor" /></svg></span>;
+  return <span className="cognote-mark" aria-hidden="true"><svg viewBox="0 0 40 40" fill="none"><path d="M28 11H18a9 9 0 0 0-9 9v1a9 9 0 0 0 9 9h10" stroke="currentColor" strokeWidth="3" strokeLinecap="round" /><path d="M17 18h7M17 23h4" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" /><path d="M28 22v8l-5-5" stroke="currentColor" strokeWidth="2.4" strokeLinejoin="round" strokeLinecap="round" /><circle cx="29" cy="11" r="3.2" fill="#d9c4ff" /></svg></span>;
 }
 
 function PageSource({ page, onOpen }: { page: number | null; onOpen?: (page: number) => void }) {
@@ -100,6 +101,24 @@ export default function ExamSprint() {
   const [activeNav, setActiveNav] = useState("home");
   const [cramRevealed, setCramRevealed] = useState(false);
   const [quizResultsOpen, setQuizResultsOpen] = useState(false);
+  const [theme, setTheme] = useState<"light" | "dark">("light");
+
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem("cognote.theme");
+      if (saved === "dark" || saved === "light") {
+        setTheme(saved);
+        document.documentElement.dataset.theme = saved;
+      }
+    } catch { /* Theme switching also works when browser storage is unavailable. */ }
+  }, []);
+
+  function toggleTheme() {
+    const next = theme === "light" ? "dark" : "light";
+    setTheme(next);
+    document.documentElement.dataset.theme = next;
+    try { localStorage.setItem("cognote.theme", next); } catch { /* Keep the current session usable. */ }
+  }
 
   useEffect(() => { setCramRevealed(false); }, [cramIndex, cramOpen]);
 
@@ -503,7 +522,7 @@ export default function ExamSprint() {
   return <div data-view={busy ? "processing" : result || ["home", "new-revision"].includes(activeNav) ? activeNav : "home"} className={`site-shell cognote-shell ${sidebarCollapsed ? "sidebar-collapsed" : ""}`}>
     {mobileNavOpen && <button className="nav-scrim" aria-label="Close navigation" onClick={() => setMobileNavOpen(false)} />}
     <aside className={`cognote-sidebar ${mobileNavOpen ? "mobile-open" : ""}`} aria-label="Main navigation">
-      <a className="sidebar-brand" href="#home" onClick={event => { event.preventDefault(); navigateSection("home"); }} aria-label="Cognote home"><CognoteMark /><strong>Cognote<span>YOUR LEARNING SPACE</span></strong></a>
+      <a className="sidebar-brand" href="#home" onClick={event => { event.preventDefault(); navigateSection("home"); }} aria-label="Cognote home"><CognoteMark /><strong><b className="brand-cog">Cog</b><em className="brand-note">note</em><span>YOUR LEARNING SPACE</span></strong></a>
       <button className="sidebar-toggle" aria-label={sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"} onClick={() => setSidebarCollapsed(value => !value)}>{sidebarCollapsed ? <PanelLeftOpen size={17} /> : <PanelLeftClose size={17} />}</button>
       <button className="mobile-nav-close" aria-label="Close navigation" onClick={() => setMobileNavOpen(false)}><X size={20} /></button>
       <nav><button title="Home" className={activeNav === "home" ? "active" : ""} onClick={() => navigateSection("home")}><Layers3 size={18} /><span>Home</span></button><button title="New Revision" className={activeNav === "new-revision" ? "active" : ""} onClick={() => navigateSection("new-revision")}><Plus size={18} /><span>New Revision</span></button>
@@ -516,6 +535,7 @@ export default function ExamSprint() {
       <div className="sidebar-bottom"><div className="sidebar-note"><ShieldCheck size={19} /><strong>Your lecture. Your source.</strong><p>Every insight starts with the material you upload.</p></div><button title="Help & Guide" onClick={() => { setMobileNavOpen(false); setHelpOpen(true); }}><HelpCircle size={18} /><span>Help & Guide</span></button><button title={user ? "Sign out" : "Sign in"} onClick={() => { setMobileNavOpen(false); user ? void signOut() : openAuth(null); }}>{user ? <LogOut size={18} /> : <UserRound size={18} />}<span>{user ? user.email : "Sign in to save your work"}</span></button></div>
     </aside>
     <header className="app-header">
+      <button className="theme-toggle" onClick={toggleTheme} aria-label={`Switch to ${theme === "light" ? "dark" : "light"} mode`} title={`Switch to ${theme === "light" ? "dark" : "light"} mode`} aria-pressed={theme === "dark"}>{theme === "light" ? <Moon size={17} /> : <Sun size={17} />}</button>
       <button className="mobile-menu" aria-label="Open navigation" aria-expanded={mobileNavOpen} onClick={() => setMobileNavOpen(true)}><Menu size={22} /></button><div className="header-context"><span>WORKSPACE</span><strong>{activeNav === "practice-quiz" && result ? "Practice studio" : activeNav === "visual-summary" && result ? "Your knowledge, connected" : activeNav === "revision-pack" && result ? "Your revision workspace" : "Make room for your next big idea."}</strong></div>
       <div className="header-status"><span className="online-dot" /> Grounded in your lecture</div>
       <div className="header-actions"><button className="sample-button" onClick={loadSample} disabled={busy}><Zap size={15} /> Try Sample Lecture</button>{user ? <><button className="library-button" onClick={() => void loadLibrary()}><Library size={15} /> My Library</button><span className="account-email"><UserRound size={14} /> {user.email}</span><button className="account-icon-button" onClick={() => void signOut()} aria-label="Sign out" title="Sign out"><LogOut size={16} /></button></> : <button className="library-button" onClick={() => openAuth(null)} disabled={!authReady}><LogIn size={15} /> Sign in</button>}</div>
