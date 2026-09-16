@@ -35,7 +35,7 @@ function compactText(value: string, max = 105) {
 }
 
 function CognoteMark() {
-  return <span className="cognote-mark" aria-hidden="true"><i /><i /><i /></span>;
+  return <span className="cognote-mark" aria-hidden="true"><svg viewBox="0 0 40 40" fill="none"><path d="M28 10H18a10 10 0 0 0 0 20h10" stroke="currentColor" strokeWidth="3.2" strokeLinecap="round" /><path d="M18 17h9M18 23h6" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" /><circle cx="30" cy="10" r="3" fill="currentColor" /><circle cx="30" cy="30" r="3" fill="currentColor" /></svg></span>;
 }
 
 function PageSource({ page, onOpen }: { page: number | null; onOpen?: (page: number) => void }) {
